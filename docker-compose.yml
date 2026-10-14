@@ -2,10 +2,13 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    ports:
+      - "5432:5432"
     environment:
-      POSTGRES_USER: makeitiny
-      POSTGRES_PASSWORD: makeitiny
-      POSTGRES_DB: makeitiny
+      POSTGRES_USER: ${POSTGRES_USER:-makeitiny}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-makeitiny}
+      POSTGRES_DB: ${POSTGRES_DB:-makeitiny}
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - ./Backend/db/data:/var/lib/postgresql/data
 
@@ -17,7 +20,7 @@ services:
     build: ./Backend/api
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://makeitiny:makeitiny@postgres:5432/makeitiny?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-makeitiny}:${POSTGRES_PASSWORD:-makeitiny}@postgres:5432/${POSTGRES_DB:-makeitiny}?sslmode=disable
       REDIS_URL: redis://redis:6379
       PORT: "8080"
     depends_on:
@@ -28,7 +31,7 @@ services:
     build: ./Backend/router
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://makeitiny:makeitiny@postgres:5432/makeitiny?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-makeitiny}:${POSTGRES_PASSWORD:-makeitiny}@postgres:5432/${POSTGRES_DB:-makeitiny}?sslmode=disable
       REDIS_URL: redis://redis:6379
       PORT: "8081"
     depends_on:
@@ -45,3 +48,14 @@ services:
     depends_on:
       - api
       - router
+
+  swagger:
+    image: swaggerapi/swagger-ui:latest
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    environment:
+      URLS: "[{ url: 'openapi/api.yaml', name: 'API Service' }, { url: 'openapi/router.yaml', name: 'Router Service' }]"
+      URLS_PRIMARY_NAME: "API Service"
+    volumes:
+      - ./openapi:/usr/share/nginx/html/openapi:ro

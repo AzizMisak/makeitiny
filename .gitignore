@@ -1,2 +1,8 @@
-Backend/.idea/Backend/db/data/*
+.idea/
+Backend/.idea/
+Backend/db/data/*
 !Backend/db/data/.gitkeep
+
+# Ortam Değişkenleri
+.env
+!.env.example
