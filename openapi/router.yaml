@@ -1,0 +1,71 @@
+openapi: 3.0.3
+info:
+  title: MakeItTiny Router
+  version: 0.1.0
+servers:
+  - url: https://router.domain.com
+    description: Router
+tags:
+  - name: Router
+paths:
+  /health:
+    get:
+      operationId: health
+      tags: [Router]
+      summary: Sağlık kontrolü
+      responses:
+        '200':
+          description: OK
+  /{link}:
+    get:
+      operationId: redirect
+      tags: [Router]
+      summary: Kısaltılmış linki ana linke yönlendir
+      description: >
+        302 Found ile yönlendirir. Tıklama istatistiklerinin kaçırılmaması için
+        301 kullanılmaz; yanıtta Cache-Control no-store, no-cache bulunur.
+      parameters:
+        - name: link
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Found
+          headers:
+            Location:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store, no-cache
+  /{link}/unlock:
+    post:
+      operationId: unlock
+      tags: [Router]
+      summary: Şifreli linkin kilidini aç ve yönlendir
+      parameters:
+        - name: link
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Found
+  /{link}/preview:
+    get:
+      operationId: preview
+      tags: [Router]
+      summary: Linkin nereye götürdüğünü önizle
+      parameters:
+        - name: link
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK

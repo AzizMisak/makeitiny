@@ -1,1 +1,2 @@
-Backend/.idea/
+Backend/.idea/Backend/db/data/*
+!Backend/db/data/.gitkeep

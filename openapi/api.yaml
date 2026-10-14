@@ -1,0 +1,108 @@
+openapi: 3.0.3
+info:
+  title: MakeItTiny API
+  version: 0.1.0
+servers:
+  - url: https://api.domain.com
+    description: API
+tags:
+  - name: Auth
+  - name: Links
+paths:
+  /auth/login:
+    post:
+      operationId: login
+      tags: [Auth]
+      summary: Giriş yap
+      responses:
+        '200':
+          description: OK
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [Auth]
+      summary: Çıkış yap
+      responses:
+        '200':
+          description: OK
+  /auth/register:
+    post:
+      operationId: register
+      tags: [Auth]
+      summary: Kayıt ol
+      responses:
+        '201':
+          description: Created
+  /auth/resetpass:
+    post:
+      operationId: resetPassword
+      tags: [Auth]
+      summary: Şifre sıfırla
+      responses:
+        '200':
+          description: OK
+  /auth/user:
+    get:
+      operationId: getCurrentUser
+      tags: [Auth]
+      summary: Oturumdaki kullanıcı bilgisi
+      responses:
+        '200':
+          description: OK
+  /links:
+    post:
+      operationId: createLink
+      tags: [Links]
+      summary: Link kısalt
+      responses:
+        '201':
+          description: Created
+    get:
+      operationId: listLinks
+      tags: [Links]
+      summary: Kullanıcıya ait kısaltılmış linkler
+      responses:
+        '200':
+          description: OK
+  /links/check-alias/{alias}:
+    get:
+      operationId: checkAlias
+      tags: [Links]
+      summary: Custom alias dolu mu kontrol et
+      parameters:
+        - name: alias
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+  /links/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getLink
+      tags: [Links]
+      summary: Kullanıcıya ait tek bir link
+      responses:
+        '200':
+          description: OK
+    patch:
+      operationId: updateLink
+      tags: [Links]
+      summary: Linki düzenle
+      responses:
+        '200':
+          description: OK
+    delete:
+      operationId: deleteLink
+      tags: [Links]
+      summary: Linki sil
+      responses:
+        '204':
+          description: No Content
