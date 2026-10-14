@@ -2,7 +2,7 @@
 
 **MakeItTiny**, yüksek performanslı ve mikroservis mimarisine sahip bir URL kısaltma ve link yönetim platformudur.
 
-Proje; yönetim işlemleri (kimlik doğrulama, link oluşturma ve analitik) ile son kullanıcı yönlendirme (redirect) trafiğini birbirinden izole eden iki ayrı Go servisi üzerine kurulmuştur. API sözleşmeleri **Spec-First** (OpenAPI 3.0) yaklaşımıyla tasarlanmış olup tüm altyapı Docker Compose ile orkestre edilmektedir.
+Proje; yönetim işlemleri (kimlik doğrulama, link oluşturma ve analitik) ile son kullanıcı yönlendirme (redirect) trafiğini birbirinden izole eden iki ayrı Go servisi üzerine kurulmuştur. API sözleşmeleri **Spec-First** (OpenAPI 3.0) yaklaşımıyla tasarlanmış olup tüm altyapı Docker Compose ile orkestre edilmektedir. Detaylı teknik kararlar için [Mimari Karar Kayıtları (ADR)](docs/adr.md) dokümanını inceleyebilirsiniz.
 
 ---
 
@@ -13,6 +13,7 @@ Proje bünyesinde yer alan servislerin port ve erişim özeti:
 | Konteyner Adı | Kaynak / İmaj | Host Portu | Dahili Port | Görevi |
 | :--- | :--- | :--- | :--- | :--- |
 | **nginx** | `nginx:1.27-alpine` | `80` | `80` | Reverse proxy ve domain bazlı trafik yönlendirme |
+| **frontend** | `./Frontend` (Nuxt 3) | `3000` | `3000` | Web kullanıcı arayüzü (Nuxt 3 & Tailwind CSS) |
 | **swagger** | `swaggerapi/swagger-ui` | `8082` | `8080` | OpenAPI şemalarını gösteren dokümantasyon arayüzü |
 | **api** | `./Backend/api` (Go) | - | `8080` | Kimlik doğrulama ve link yönetim API servisi |
 | **router** | `./Backend/router` (Go) | - | `8081` | Kısaltılmış linklerin yüksek hızlı yönlendirme servisi |
@@ -23,9 +24,10 @@ Proje bünyesinde yer alan servislerin port ve erişim özeti:
 
 ### 1. Nginx (`nginx`)
 - **Port:** `80:80` (Dışarıya açık)
-- **Erişim:** `http://api.domain.com` ve `http://router.domain.com`
+- **Erişim:** `http://localhost` (Frontend), `http://api.domain.com` ve `http://router.domain.com`
 - **Sorumluluk:**
   Sistemin ön yüzündeki ters vekil (reverse proxy) sunucusudur. Gelen HTTP isteklerinin `Host` başlığını inceleyerek trafiği ilgili iç servise iletir:
+  - `localhost` üzerinden gelen istekleri doğrudan `frontend:3000` web arayüzüne yönlendirir.
   - `api.domain.com` isteklerini doğrudan `api:8080` servisine yönlendirir.
   - `router.domain.com` isteklerini doğrudan `router:8081` servisine yönlendirir.
 
@@ -85,6 +87,13 @@ Proje bünyesinde yer alan servislerin port ve erişim özeti:
 - **Port:** `6379` (Yalnızca Docker iç ağı)
 - **Sorumluluk:**
   Özellikle yönlendirme (`router`) servisinin link hedeflerine mikrosaniyeler mertebesinde erişebilmesi için kullanılan bellek içi (in-memory) önbellekleme katmanıdır. Sık erişilen link verilerini hafızada tutarak veritabanı yükünü minimize eder.
+
+---
+
+### 7. Frontend (`frontend`)
+- **Port:** `3000:3000` (Doğrudan: `http://localhost:3000` veya Nginx üzerinden: `http://localhost`)
+- **Sorumluluk:**
+  Kullanıcıların link oluşturabileceği, kısaltılmış bağlantıları yönetebileceği ve erişim istatistiklerini takip edebileceği Nuxt 3 ve Tailwind CSS ile geliştirilmiş modern web kullanıcı arayüzüdür.
 
 ---
 

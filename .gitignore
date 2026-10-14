@@ -3,6 +3,7 @@ Backend/.idea/
 Backend/db/data/*
 !Backend/db/data/.gitkeep
 
+notes.txt
 # Ortam Değişkenleri
 .env
 !.env.example

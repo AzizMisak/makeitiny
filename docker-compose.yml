@@ -38,6 +38,15 @@ services:
       - postgres
       - redis
 
+  frontend:
+    build: ./Frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3000"
+
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
@@ -48,6 +57,7 @@ services:
     depends_on:
       - api
       - router
+      - frontend
 
   swagger:
     image: swaggerapi/swagger-ui:latest
