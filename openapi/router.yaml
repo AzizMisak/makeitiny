@@ -3,8 +3,8 @@ info:
   title: MakeItTiny Router
   version: 0.1.0
 servers:
-  - url: https://router.domain.com
-    description: Router
+  - url: http://localhost:8081
+    description: Router Local
 tags:
   - name: Router
 paths:

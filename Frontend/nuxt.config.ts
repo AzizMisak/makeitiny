@@ -6,7 +6,7 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
   runtimeConfig: {
     public: {
-      apiBase: 'http://localhost:8080',
+      apiBase: 'http://localhost:3000',
       routerBase: 'http://localhost:8081'
     }
   },

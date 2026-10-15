@@ -19,6 +19,8 @@ services:
   api:
     build: ./Backend/api
     restart: unless-stopped
+    ports:
+      - "8080:8080"
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-makeitiny}:${POSTGRES_PASSWORD:-makeitiny}@postgres:5432/${POSTGRES_DB:-makeitiny}?sslmode=disable
       REDIS_URL: redis://redis:6379
@@ -30,6 +32,8 @@ services:
   router:
     build: ./Backend/router
     restart: unless-stopped
+    ports:
+      - "8081:8081"
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-makeitiny}:${POSTGRES_PASSWORD:-makeitiny}@postgres:5432/${POSTGRES_DB:-makeitiny}?sslmode=disable
       REDIS_URL: redis://redis:6379
@@ -41,8 +45,6 @@ services:
   frontend:
     build: ./Frontend
     restart: unless-stopped
-    ports:
-      - "3000:3000"
     environment:
       HOST: "0.0.0.0"
       PORT: "3000"
