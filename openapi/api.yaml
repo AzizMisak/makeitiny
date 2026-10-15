@@ -6,9 +6,23 @@ servers:
   - url: https://api.domain.com
     description: API
 tags:
+  - name: Health
   - name: Auth
   - name: Links
 paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [Health]
+      summary: Sağlık kontrolü
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Healthy
   /auth/login:
     post:
       operationId: login
