@@ -1,6 +1,11 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'marketing' })
 useHead({ title: 'Kayıt ol — makeiTiny' })
+
+const { isLoggedIn } = useAuth()
+if (isLoggedIn.value) {
+  await navigateTo('/dashboard', { replace: true })
+}
 </script>
 
 <template>

@@ -1,10 +1,16 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+
+	"makeitiny/router/internal/db"
 	"makeitiny/router/internal/gen"
 	"makeitiny/router/internal/handler"
 	"makeitiny/router/internal/repository"
@@ -17,8 +23,54 @@ func main() {
 		port = "8081"
 	}
 
-	linkRepo := repository.NewLinkRepository()
-	h := handler.New(service.NewRedirectService(linkRepo))
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://makeitiny:makeitiny@localhost:5432/makeitiny?sslmode=disable"
+	}
+
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379"
+	}
+
+	frontendURL := os.Getenv("FRONTEND_URL")
+	if frontendURL == "" {
+		frontendURL = "http://localhost"
+	}
+
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		log.Fatalf("postgres bağlantı havuzu oluşturulamadı: %v", err)
+	}
+	defer pool.Close()
+
+	for i := 1; i <= 10; i++ {
+		if err = pool.Ping(ctx); err == nil {
+			break
+		}
+		log.Printf("postgres bekleniyor (%d/10): %v", i, err)
+		time.Sleep(time.Second)
+	}
+	if err != nil {
+		log.Fatalf("postgres'e ulaşılamadı: %v", err)
+	}
+
+	redisOpts, err := redis.ParseURL(redisURL)
+	if err != nil {
+		log.Fatalf("geçersiz REDIS_URL: %v", err)
+	}
+	rdb := redis.NewClient(redisOpts)
+	defer rdb.Close()
+
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		log.Printf("uyarı: redis ping başarısız (%v), servis çalışmaya devam ediyor", err)
+	}
+
+	queries := db.New(pool)
+	linkRepo := repository.NewLinkRepository(queries, rdb)
+	h := handler.New(service.NewRedirectService(linkRepo), frontendURL)
 
 	allowedOrigins := []string{
 		"http://localhost:8082",

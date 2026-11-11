@@ -9,21 +9,29 @@ interface RequestOptions<TBody> {
 
 /**
  * Backend'e tip güvenli istek atar. Dönüş tipi çağıran tarafından verilir:
- *   const links = await useApi().get<Paginated<LinkItem>>('/links')
+ *   const links = await useApi().get<LinkItem[]>('/links')
  * Hatalar ApiError şekline çevrilip fırlatılır.
  */
 export function useApi() {
   const { public: config } = useRuntimeConfig()
+  const token = useCookie<string | null>('mit_token')
 
   async function request<TResponse, TBody = unknown>(
     method: Method,
     path: string,
     options: RequestOptions<TBody> = {}
   ): Promise<TResponse> {
+    const baseURL = import.meta.server ? 'http://api:8080' : config.apiBase
+    const headers: Record<string, string> = {}
+    if (token.value) {
+      headers.Authorization = `Bearer ${token.value}`
+    }
+
     try {
       return await $fetch<TResponse>(path, {
-        baseURL: config.apiBase,
+        baseURL,
         method,
+        headers,
         body: options.body as Record<string, unknown> | undefined,
         query: options.query,
         credentials: 'include'

@@ -1,10 +1,18 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
+	"github.com/redis/go-redis/v9"
+
+	"makeitiny/api/internal/db"
 	"makeitiny/api/internal/gen"
 	"makeitiny/api/internal/handler"
 	"makeitiny/api/internal/repository"
@@ -17,9 +25,60 @@ func main() {
 		port = "8080"
 	}
 
-	userRepo := repository.NewUserRepository()
-	linkRepo := repository.NewLinkRepository()
-	h := handler.New(service.NewAuthService(userRepo), service.NewLinkService(linkRepo))
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://makeitiny:makeitiny@localhost:5432/makeitiny?sslmode=disable"
+	}
+
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://localhost:6379"
+	}
+
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = "makeitiny-dev-secret-key-2026"
+	}
+
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		log.Fatalf("postgres bağlantı havuzu oluşturulamadı: %v", err)
+	}
+	defer pool.Close()
+
+	for i := 1; i <= 10; i++ {
+		if err = pool.Ping(ctx); err == nil {
+			break
+		}
+		log.Printf("postgres bekleniyor (%d/10): %v", i, err)
+		time.Sleep(time.Second)
+	}
+	if err != nil {
+		log.Fatalf("postgres'e ulaşılamadı: %v", err)
+	}
+
+	runMigrations(pool)
+
+	redisOpts, err := redis.ParseURL(redisURL)
+	if err != nil {
+		log.Fatalf("geçersiz REDIS_URL: %v", err)
+	}
+	rdb := redis.NewClient(redisOpts)
+	defer rdb.Close()
+
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		log.Printf("uyarı: redis ping başarısız (%v), servis çalışmaya devam ediyor", err)
+	}
+
+	queries := db.New(pool)
+	userRepo := repository.NewUserRepository(queries, rdb)
+	linkRepo := repository.NewLinkRepository(queries, rdb)
+
+	authSvc := service.NewAuthService(userRepo, jwtSecret)
+	linkSvc := service.NewLinkService(linkRepo)
+	h := handler.New(authSvc, linkSvc)
 
 	allowedOrigins := []string{
 		"http://localhost:8082",
@@ -34,6 +93,32 @@ func main() {
 
 	log.Println("api listening on :" + port)
 	log.Fatal(http.ListenAndServe(":"+port, handlerWithCORS))
+}
+
+func runMigrations(pool *pgxpool.Pool) {
+	candidates := []string{"/migrations", "../db/migrations", "./Backend/db/migrations"}
+	var migDir string
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			migDir = c
+			break
+		}
+	}
+	if migDir == "" {
+		log.Println("migrations dizini bulunamadı, otomatik goose migration atlandı")
+		return
+	}
+
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	defer sqlDB.Close()
+
+	if err := goose.SetDialect("postgres"); err != nil {
+		log.Printf("goose dialect hatası: %v", err)
+		return
+	}
+	if err := goose.Up(sqlDB, migDir); err != nil {
+		log.Printf("goose up hatası: %v", err)
+	}
 }
 
 func withCORS(next http.Handler, allowedOrigins []string) http.Handler {

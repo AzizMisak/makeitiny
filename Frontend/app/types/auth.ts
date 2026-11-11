@@ -5,6 +5,12 @@ export interface User {
   email: string
 }
 
+/** POST /auth/login ve POST /auth/register yanıtı. */
+export interface AuthResponse {
+  token: string
+  user: User
+}
+
 /** POST /auth/login gövdesi. */
 export interface LoginPayload {
   email: string
@@ -13,6 +19,7 @@ export interface LoginPayload {
 
 /** POST /auth/register gövdesi. */
 export interface RegisterPayload {
+  name?: string
   email: string
   password: string
 }
@@ -20,4 +27,5 @@ export interface RegisterPayload {
 /** POST /auth/resetpass gövdesi. */
 export interface ResetPasswordPayload {
   email: string
+  newPassword: string
 }

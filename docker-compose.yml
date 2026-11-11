@@ -26,7 +26,10 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-makeitiny}:${POSTGRES_PASSWORD:-makeitiny}@postgres:5432/${POSTGRES_DB:-makeitiny}?sslmode=disable
       REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-makeitiny-dev-secret-key-2026}
       PORT: "8080"
+    volumes:
+      - ./Backend/db/migrations:/migrations:ro
     depends_on:
       - postgres
       - redis

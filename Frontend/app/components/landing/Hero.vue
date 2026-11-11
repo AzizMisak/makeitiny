@@ -1,3 +1,7 @@
+<script setup lang="ts">
+const { isLoggedIn } = useAuth()
+</script>
+
 <template>
   <section class="container-x grid items-center gap-14 py-16 md:py-24 lg:grid-cols-[1.05fr_0.95fr]">
     <div>
@@ -14,10 +18,18 @@
         şifre koy, kaç kişinin tıkladığını gör.
       </p>
       <div class="mt-9 flex flex-wrap items-center gap-3">
-        <UiButton to="/auth/register">Ücretsiz hesap aç</UiButton>
-        <UiButton to="/auth/login" variant="secondary">Giriş yap</UiButton>
+        <template v-if="isLoggedIn">
+          <UiButton to="/dashboard">Panele git</UiButton>
+          <UiButton to="/dashboard/new" variant="secondary">
+            <UiIcon name="plus" :size="16" /> Yeni link kısalt
+          </UiButton>
+        </template>
+        <template v-else>
+          <UiButton to="/auth/register">Ücretsiz hesap aç</UiButton>
+          <UiButton to="/auth/login" variant="secondary">Giriş yap</UiButton>
+        </template>
       </div>
-      <p class="mt-5 text-sm text-ink-3">Kredi kartı gerekmez. Dakikalar içinde ilk linkini kısalt.</p>
+      <p v-if="!isLoggedIn" class="mt-5 text-sm text-ink-3">Kredi kartı gerekmez. Dakikalar içinde ilk linkini kısalt.</p>
     </div>
 
     <LandingHeroDemo />
