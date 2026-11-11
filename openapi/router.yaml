@@ -3,8 +3,10 @@ info:
   title: MakeItTiny Router
   version: 0.1.0
 servers:
+  - url: http://localhost/r
+    description: Router (Nginx Reverse Proxy)
   - url: http://localhost:8081
-    description: Router Local
+    description: Router (Doğrudan Port - Geliştirme)
 tags:
   - name: Router
 paths:

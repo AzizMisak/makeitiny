@@ -2,7 +2,7 @@
 
 **Proje:** MakeItTiny  
 **Tarih:** 2026-10-14  
-**Durum:** Aktif / Yaşayan Doküman  
+**Durum:** Aktif Doküman  
 
 Bu doküman, MakeItTiny projesinin geliştirilme sürecinde alınan temel mimari kararları, bu kararların gerekçelerini ve sistem üzerindeki etkilerini kayıt altına almak amacıyla hazırlanmıştır.
 
@@ -17,6 +17,7 @@ Bu doküman, MakeItTiny projesinin geliştirilme sürecinde alınan temel mimari
 6. [ADR-006: Veri ve Önbellek Katmanı (PostgreSQL & Redis)](#adr-006-veri-ve-önbellek-katmanı-postgresql--redis)
 7. [ADR-007: Frontend Teknolojisi (Nuxt & Tailwind CSS)](#adr-007-frontend-teknolojisi-nuxt--tailwind-css)
 8. [ADR-008: Bağımsız Konteynerizasyon ve Swagger Dokümantasyonu](#adr-008-bağımsız-konteynerizasyon-ve-swagger-dokümantasyonu)
+9. [ADR-009: Path Bazlı Nginx Yönlendirmesi ve Geliştirme/Prod Port Stratejisi](#adr-009-path-bazlı-nginx-yönlendirmesi-ve-geliştirmeprod-port-stratejisi)
 
 ---
 
@@ -109,3 +110,26 @@ Bu doküman, MakeItTiny projesinin geliştirilme sürecinde alınan temel mimari
   * Her bir servis (`api`, `router`, `postgres`, `redis`, `nginx`, `swagger`) kendi izole ortamında çalışır.
   * Geliştirici veya kullanıcı `docker compose up -d` komutu ile tüm sistemi bağımlılıklarıyla birlikte ayağa kaldırabilir.
   * Swagger UI ayrı bir konteynerde `8082` portunda çalıştırılarak, Go servislerinin kodlarına dokunmadan `api` ve `router` sözleşmeleri tek bir açılır listeden (dropdown) interaktif olarak test edilebilir hale getirildi.
+
+---
+
+### ADR-009: Path Bazlı Nginx Yönlendirmesi ve Geliştirme/Prod Port Stratejisi
+
+* **Durum:** Kabul Edildi (Güncelleme Notu)
+* **Bağlam:** İlk tasarımda Nginx üzerinde alt alan adlarına (`api.domain.com`, `router.domain.com`) dayalı bir yönlendirme kurgulanmıştı. Ancak geliştirme aşamasında henüz aktif bir alan adının (domain) bulunmaması, alt alan adlarının kısaltılmış linkleri gereksiz uzatması, Nginx'te tanımsız `Host` başlıklarıyla gelen isteklerin ilk sıradaki `api` servisine düşmesi ve Nuxt/Swagger yapılandırmalarında port çakışmalarının yaşanması nedeniyle yönlendirme ve port stratejisinde revizyona gidildi.
+* **Karar:**
+  1. **Path (Yol) Bazlı Tekil Giriş Kapısı:** Subdomain ayrımı yerine tek bir sunucu bloğu (`localhost` / `127.0.0.1`) üzerinden path bazlı yönlendirmeye geçildi:
+     * `/api/*` → Docker iç ağındaki `http://api:8080/` servisine yönlendirilir.
+     * `/r/*` → Docker iç ağındaki `http://router:8081/` servisine yönlendirilir.
+     * `/` (diğer tüm yollar) → Docker iç ağındaki `http://frontend:3000` servisine yönlendirilir.
+  2. **Tanımsız Host ve Dış İsteklerin Engellenmesi:** Nginx'e `listen 80 default_server; server_name _;` bloğu eklenerek `localhost` ve `127.0.0.1` dışındaki tanımsız adreslerden gelen isteklerin `api` servisine düşmesi önlendi ve `444` koduyla bağlantıların doğrudan kapatılması sağlandı.
+  3. **Geliştirme (Dev) ve Canlı (Prod) Port Politikası:**
+     * Geliştirme sürecinde tüm sistem `docker compose up` ile çalıştırıldığından, hata ayıklama ve doğrudan erişim kolaylığı için tüm servislerin portları (`80`, `3000`, `8080`, `8081`, `8082`, `5432`, `6379`) host makineye açık bırakıldı.
+     * Buna karşın Nginx, servislerle her zaman Docker iç ağı üzerinden (`api:8080`, `router:8081`, `frontend:3000`) haberleşecek şekilde tutuldu. Prod ortamına çıkılırken diğer servislerin dış portları kapatılıp yalnızca Nginx dış dünyaya açık bırakılacaktır.
+  4. **Frontend ve Swagger Uyumlaması:**
+     * Nuxt `runtimeConfig.public` altındaki `apiBase` (`http://localhost:3000` çakışması giderilerek `http://localhost/api`) ve `routerBase` (`http://localhost/r`) adresleri yeni Nginx path yapısına göre güncellendi.
+     * OpenAPI şemalarına (`openapi/api.yaml` ve `openapi/router.yaml`) hem Nginx proxy adresleri (`http://localhost/api`, `http://localhost/r`) hem de doğrudan geliştirme portları (`http://localhost:8080`, `http://localhost:8081`) eklendi; `router` servisinin CORS izin listesi yerel tarayıcı ve frontend origin'lerini kapsayacak şekilde genişletildi.
+* **Gerekçe:**
+  * `Host` başlığı karmaşası ve yerel geliştirme ortamında `/etc/hosts` düzenleme zorunluluğu tamamen ortadan kaldırıldı.
+  * Kısaltılmış linkler için `/r/` öneki kullanılarak Frontend sayfa rotaları ile kısa linklerin çakışma ihtimali sıfırlandı.
+  * Geliştirme ortamında esneklik korunurken, canlı ortama geçişte yalnızca portların kapatılmasıyla güvenli çalışacak mimari garanti altına alındı.

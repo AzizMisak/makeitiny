@@ -33,21 +33,17 @@ func (h *Handler) GetHealth(w http.ResponseWriter, r *http.Request) {
 
 // Auth
 
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request)         { notImplemented(w) }
-func (h *Handler) Logout(w http.ResponseWriter, r *http.Request)        { notImplemented(w) }
-func (h *Handler) Register(w http.ResponseWriter, r *http.Request)      { notImplemented(w) }
-func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) { notImplemented(w) }
-func (h *Handler) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
-	notImplemented(w)
-}
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request)          { notImplemented(w) }
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request)         { notImplemented(w) }
+func (h *Handler) Register(w http.ResponseWriter, r *http.Request)       { notImplemented(w) }
+func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request)  { notImplemented(w) }
+func (h *Handler) GetCurrentUser(w http.ResponseWriter, r *http.Request) { notImplemented(w) }
 
 // Links
 
-func (h *Handler) CreateLink(w http.ResponseWriter, r *http.Request) { notImplemented(w) }
-func (h *Handler) ListLinks(w http.ResponseWriter, r *http.Request)  { notImplemented(w) }
-func (h *Handler) CheckAlias(w http.ResponseWriter, r *http.Request, alias string) {
-	notImplemented(w)
-}
-func (h *Handler) GetLink(w http.ResponseWriter, r *http.Request, id string)    { notImplemented(w) }
-func (h *Handler) UpdateLink(w http.ResponseWriter, r *http.Request, id string) { notImplemented(w) }
-func (h *Handler) DeleteLink(w http.ResponseWriter, r *http.Request, id string) { notImplemented(w) }
+func (h *Handler) CreateLink(w http.ResponseWriter, r *http.Request)               { notImplemented(w) }
+func (h *Handler) ListLinks(w http.ResponseWriter, r *http.Request)                { notImplemented(w) }
+func (h *Handler) CheckAlias(w http.ResponseWriter, r *http.Request, alias string) { notImplemented(w) }
+func (h *Handler) GetLink(w http.ResponseWriter, r *http.Request, id string)       { notImplemented(w) }
+func (h *Handler) UpdateLink(w http.ResponseWriter, r *http.Request, id string)    { notImplemented(w) }
+func (h *Handler) DeleteLink(w http.ResponseWriter, r *http.Request, id string)    { notImplemented(w) }

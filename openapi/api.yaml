@@ -3,8 +3,10 @@ info:
   title: MakeItTiny API
   version: 0.1.0
 servers:
+  - url: http://localhost/api
+    description: API (Nginx Reverse Proxy)
   - url: http://localhost:8080
-    description: API Local
+    description: API (Doğrudan Port - Geliştirme)
 tags:
   - name: Health
   - name: Auth
