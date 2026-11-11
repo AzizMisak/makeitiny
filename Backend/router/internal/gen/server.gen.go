@@ -12,18 +12,56 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// ApiError defines model for ApiError.
+type ApiError struct {
+	// Code Example: link_not_found
+	Code string `json:"code"`
+
+	// Message Example: Aradığınız kısa link bulunamadı.
+	Message string `json:"message"`
+}
+
+// LinkPreview defines model for LinkPreview.
+type LinkPreview struct {
+	// Alias Example: kampanya-yaz
+	Alias string `json:"alias"`
+
+	// Locked Example: false
+	Locked bool `json:"locked"`
+
+	// Target Link şifreliyse güvenlik için boş döner.
+	//
+	// Example: https://magaza.example.com/kampanyalar/yaz-indirimi
+	Target string `json:"target"`
+}
+
+// UnlockLinkRequest defines model for UnlockLinkRequest.
+type UnlockLinkRequest struct {
+	// Password Example: gizli123
+	Password string `json:"password"`
+}
+
+// UnlockLinkResponse defines model for UnlockLinkResponse.
+type UnlockLinkResponse struct {
+	// Target Example: https://magaza.example.com/kampanyalar/yaz-indirimi
+	Target string `json:"target"`
+}
+
+// UnlockJSONRequestBody defines body for Unlock for application/json ContentType.
+type UnlockJSONRequestBody = UnlockLinkRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Health Sağlık kontrolü
 	// (GET /health)
 	Health(w http.ResponseWriter, r *http.Request)
-	// Redirect Kısaltılmış linki ana linke yönlendir
+	// Redirect Kısaltılmış linki hedef adrese yönlendir
 	// (GET /{link})
 	Redirect(w http.ResponseWriter, r *http.Request, link string)
-	// Preview Linkin nereye götürdüğünü önizle
+	// Preview Kısa linkin nereye götürdüğünü önizle
 	// (GET /{link}/preview)
 	Preview(w http.ResponseWriter, r *http.Request, link string)
-	// Unlock Şifreli linkin kilidini aç ve yönlendir
+	// Unlock Şifreli linkin kilidini aç ve hedef adresi döndür / yönlendir
 	// (POST /{link}/unlock)
 	Unlock(w http.ResponseWriter, r *http.Request, link string)
 }

@@ -18,6 +18,7 @@ Bu doküman, MakeItTiny projesinin geliştirilme sürecinde alınan temel mimari
 7. [ADR-007: Frontend Teknolojisi (Nuxt & Tailwind CSS)](#adr-007-frontend-teknolojisi-nuxt--tailwind-css)
 8. [ADR-008: Bağımsız Konteynerizasyon ve Swagger Dokümantasyonu](#adr-008-bağımsız-konteynerizasyon-ve-swagger-dokümantasyonu)
 9. [ADR-009: Path Bazlı Nginx Yönlendirmesi ve Geliştirme/Prod Port Stratejisi](#adr-009-path-bazlı-nginx-yönlendirmesi-ve-geliştirmeprod-port-stratejisi)
+10. [ADR-010: Kimlik Doğrulama, Şifreleme, Link Üretimi ve Redis Hash Mimarisi](#adr-010-kimlik-doğrulama-şifreleme-link-üretimi-ve-redis-hash-mimarisi)
 
 ---
 
@@ -133,3 +134,23 @@ Bu doküman, MakeItTiny projesinin geliştirilme sürecinde alınan temel mimari
   * `Host` başlığı karmaşası ve yerel geliştirme ortamında `/etc/hosts` düzenleme zorunluluğu tamamen ortadan kaldırıldı.
   * Kısaltılmış linkler için `/r/` öneki kullanılarak Frontend sayfa rotaları ile kısa linklerin çakışma ihtimali sıfırlandı.
   * Geliştirme ortamında esneklik korunurken, canlı ortama geçişte yalnızca portların kapatılmasıyla güvenli çalışacak mimari garanti altına alındı.
+
+---
+
+### ADR-010: Kimlik Doğrulama, Şifreleme, Link Üretimi ve Redis Hash Mimarisi
+
+* **Durum:** Kabul Edildi
+* **Bağlam:** Altyapı ve veritabanı şemalarının tamamlanmasının ardından; kimlik doğrulama yöntemi, parola saklama güvenliği, kısa link (`alias`) üretim algoritması, Redis önbellekleme veri modeli ve şifreli link yönlendirme akışının netleştirilmesi gerekti.
+* **Karar:**
+  1. **Kimlik Doğrulama (JWT):** Oturum yönetimi için durumsuz (stateless) **JWT (`HS256` - Bearer Token)** kullanılmasına karar verildi. Kayıt sırasında `name` alanı gönderilmezse varsayılan kullanıcı adı olarak e-posta adresinin `@` işaretinden önceki kısmı atanacaktır.
+  2. **Parola Güvenliği (`Argon2id`):** Hem kullanıcı hesap parolaları (`users.password_hash`) hem de şifreli kısa link parolaları (`links.password_hash`) Go'nun `golang.org/x/crypto/argon2` paketiyle **Argon2id** algoritması kullanılarak hash'lenecektir.
+  3. **Kısa Link Üretim Algoritması (Rastgele Base62):** Kullanıcı özel bir takma ad (`alias`) belirtmediğinde, kriptografik olarak rastgele (`crypto/rand`) **Base62 (`[0-9a-zA-Z]`)** karakter kümesinden kısa kod üretilecektir.
+  4. **Veritabanı (`goose` + `sqlc`) ve Redis (`go-redis` Hash) Veri Modeli:**
+     * Veritabanı şema göçleri ortak `Backend/db/migrations` dizininde **Goose** ile, tip güvenli sorgu üretimi ise `api` ve `router` servislerinde birbirinden bağımsız **sqlc** yapılandırmalarıyla yönetilecektir.
+     * Redis üzerinde veriler bir NoSQL tablosu/dokümanı gibi **Redis Hash (`HSET` / `HGETALL` / `HINCRBY`)** yapısında (`link:{alias}` anahtarı altında `id`, `user_id`, `target_url`, `password_hash`, `clicks` alanlarıyla) tutulacaktır.
+     * Yönlendirme ve veri değişikliklerinde önce PostgreSQL işlemi gerçekleştirilecek, hemen ardından Redis Hash kaydı güncellenecektir (`HINCRBY` / `HSET` / `DEL`).
+  5. **Şifreli Link Yönlendirme Akışı:** Bir kullanıcı tarayıcıdan şifreli bir kısa linke (`GET /r/{link}`) eriştiğinde, `router` servisi kullanıcıyı Frontend üzerindeki şifre çözme sayfasına (`/unlock/{link}`) yönlendirecek; parola doğrulaması `POST /r/{link}/unlock` üzerinden tamamlanacaktır.
+* **Gerekçe:**
+  * Redis Hash kullanımı sayesinde tüm nesneyi serialize/deserialize etmeye gerek kalmadan tekil alanlar (`clicks`, `target_url`) atomik olarak güncellenebilir.
+  * Önce PostgreSQL ardından Redis güncellemesi yapılarak kalıcı veri tutarlılığı (consistency) garanti altına alınır.
+  * Argon2id ve kriptografik Base62 ile hem parola güvenliği hem de kısa linklerin tahmin edilemezliği sağlanır.

@@ -2,6 +2,7 @@ openapi: 3.0.3
 info:
   title: MakeItTiny API
   version: 0.1.0
+  description: MakeItTiny kullanıcı yönetimi, kimlik doğrulama ve kısa link CRUD servisi.
 servers:
   - url: http://localhost/api
     description: API (Nginx Reverse Proxy)
@@ -19,81 +20,258 @@ paths:
       summary: Sağlık kontrolü
       responses:
         '200':
-          description: OK
+          description: Servis ayakta
           content:
             text/plain:
               schema:
                 type: string
                 example: Healthy
-  /auth/login:
-    post:
-      operationId: login
-      tags: [Auth]
-      summary: Giriş yap
-      responses:
-        '200':
-          description: OK
-  /auth/logout:
-    post:
-      operationId: logout
-      tags: [Auth]
-      summary: Çıkış yap
-      responses:
-        '200':
-          description: OK
+
   /auth/register:
     post:
       operationId: register
       tags: [Auth]
-      summary: Kayıt ol
+      summary: Yeni kullanıcı kaydı oluştur
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
       responses:
         '201':
-          description: Created
+          description: Kayıt başarılı ve oturum açıldı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Geçersiz istek verisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: E-posta adresi zaten kullanımda
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [Auth]
+      summary: Kullanıcı girişi yap
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Giriş başarılı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Geçersiz istek verisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: E-posta veya parola hatalı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [Auth]
+      summary: Oturumu sonlandır
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Çıkış başarılı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /auth/resetpass:
     post:
       operationId: resetPassword
       tags: [Auth]
-      summary: Şifre sıfırla
+      summary: Kullanıcı şifresini değiştir / sıfırla
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
       responses:
         '200':
-          description: OK
+          description: Şifre başarıyla güncellendi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: Geçersiz istek verisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Kullanıcı bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /auth/user:
     get:
       operationId: getCurrentUser
       tags: [Auth]
-      summary: Oturumdaki kullanıcı bilgisi
+      summary: Oturumdaki kullanıcı bilgisini getir
+      security:
+        - bearerAuth: []
       responses:
         '200':
-          description: OK
+          description: Kullanıcı bilgileri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      operationId: deleteUser
+      tags: [Auth]
+      summary: Oturumdaki kullanıcının hesabını ve tüm linklerini sil
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Hesap başarıyla silindi
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /links:
     post:
       operationId: createLink
       tags: [Links]
-      summary: Link kısalt
+      summary: Yeni kısa link oluştur
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLinkRequest'
       responses:
         '201':
-          description: Created
+          description: Kısa link oluşturuldu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkItem'
+        '400':
+          description: Geçersiz URL veya parametre
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Seçilen takma ad (alias) zaten kullanımda
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     get:
       operationId: listLinks
       tags: [Links]
-      summary: Kullanıcıya ait kısaltılmış linkler
+      summary: Oturumdaki kullanıcıya ait kısaltılmış linkleri listele
+      security:
+        - bearerAuth: []
       responses:
         '200':
-          description: OK
+          description: Kullanıcının link listesi
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LinkItem'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /links/check-alias/{alias}:
     get:
       operationId: checkAlias
       tags: [Links]
-      summary: Custom alias dolu mu kontrol et
+      summary: Özel takma ad (custom alias) müsait mi kontrol et
+      security:
+        - bearerAuth: []
       parameters:
         - name: alias
           in: path
           required: true
           schema:
             type: string
+            minLength: 3
+            maxLength: 32
       responses:
         '200':
-          description: OK
+          description: Kontrol sonucu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AliasCheckResult'
+        '400':
+          description: Geçersiz alias formatı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /links/{id}:
     parameters:
       - name: id
@@ -104,21 +282,282 @@ paths:
     get:
       operationId: getLink
       tags: [Links]
-      summary: Kullanıcıya ait tek bir link
+      summary: Kullanıcıya ait tek bir linkin detayını getir
+      security:
+        - bearerAuth: []
       responses:
         '200':
-          description: OK
+          description: Link detayı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkItem'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     patch:
       operationId: updateLink
       tags: [Links]
-      summary: Linki düzenle
+      summary: Mevcut bir linki düzenle (hedef URL, alias veya parola)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLinkRequest'
       responses:
         '200':
-          description: OK
+          description: Güncellenmiş link bilgisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkItem'
+        '400':
+          description: Geçersiz istek verisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Yeni takma ad zaten kullanımda
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     delete:
       operationId: deleteLink
       tags: [Links]
-      summary: Linki sil
+      summary: Kullanıcıya ait bir linki sil
+      security:
+        - bearerAuth: []
       responses:
         '204':
-          description: No Content
+          description: Link başarıyla silindi
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Giriş veya kayıt sonrası alınan JWT token (Authorization: Bearer <token>)"
+
+  schemas:
+    ApiError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: invalid_request
+        message:
+          type: string
+          example: Geçersiz istek parametreleri.
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            email: Geçerli bir e-posta adresi giriniz.
+
+    MessageResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          example: İşlem başarıyla tamamlandı.
+
+    User:
+      type: object
+      required:
+        - id
+        - name
+        - email
+      properties:
+        id:
+          type: string
+          example: "1"
+        name:
+          type: string
+          example: aziz
+        email:
+          type: string
+          format: email
+          example: aziz@makeitiny.com
+
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        name:
+          type: string
+          example: aziz
+        email:
+          type: string
+          format: email
+          example: aziz@makeitiny.com
+        password:
+          type: string
+          minLength: 8
+          example: GucluSifre123
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: aziz@makeitiny.com
+        password:
+          type: string
+          example: GucluSifre123
+
+    ResetPasswordRequest:
+      type: object
+      required:
+        - email
+        - newPassword
+      properties:
+        email:
+          type: string
+          format: email
+          example: aziz@makeitiny.com
+        newPassword:
+          type: string
+          minLength: 8
+          example: YeniGucluSifre123
+
+    AuthResponse:
+      type: object
+      required:
+        - token
+        - user
+      properties:
+        token:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        user:
+          $ref: '#/components/schemas/User'
+
+    LinkItem:
+      type: object
+      required:
+        - id
+        - alias
+        - target
+        - clicks
+        - locked
+        - createdAt
+      properties:
+        id:
+          type: string
+          example: "1"
+        alias:
+          type: string
+          example: kampanya-yaz
+        target:
+          type: string
+          format: uri
+          example: https://magaza.example.com/kampanyalar/yaz-indirimi
+        clicks:
+          type: integer
+          format: int64
+          example: 1284
+        locked:
+          type: boolean
+          example: false
+        createdAt:
+          type: string
+          example: "2026-10-02"
+
+    CreateLinkRequest:
+      type: object
+      required:
+        - target
+      properties:
+        target:
+          type: string
+          format: uri
+          example: https://magaza.example.com/kampanyalar/yaz-indirimi
+        alias:
+          type: string
+          minLength: 3
+          maxLength: 32
+          example: kampanya-yaz
+        password:
+          type: string
+          example: gizli123
+
+    UpdateLinkRequest:
+      type: object
+      properties:
+        target:
+          type: string
+          format: uri
+          example: https://magaza.example.com/yeni-hedef
+        alias:
+          type: string
+          minLength: 3
+          maxLength: 32
+          example: yeni-kampanya
+        password:
+          type: string
+          description: Boş string gönderilirse parola kaldırılır, dolu gönderilirse güncellenir.
+          example: yeniSifre123
+
+    AliasCheckResult:
+      type: object
+      required:
+        - alias
+        - available
+      properties:
+        alias:
+          type: string
+          example: kampanya-yaz
+        available:
+          type: boolean
+          example: true

@@ -38,6 +38,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request)         { notIm
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request)       { notImplemented(w) }
 func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request)  { notImplemented(w) }
 func (h *Handler) GetCurrentUser(w http.ResponseWriter, r *http.Request) { notImplemented(w) }
+func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request)     { notImplemented(w) }
 
 // Links
 

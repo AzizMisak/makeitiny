@@ -2,6 +2,7 @@ openapi: 3.0.3
 info:
   title: MakeItTiny Router
   version: 0.1.0
+  description: MakeItTiny yüksek hızlı kısa link çözümleme, parola doğrulama ve önizleme servisi.
 servers:
   - url: http://localhost/r
     description: Router (Nginx Reverse Proxy)
@@ -17,15 +18,22 @@ paths:
       summary: Sağlık kontrolü
       responses:
         '200':
-          description: OK
+          description: Servis ayakta
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ok
+
   /{link}:
     get:
       operationId: redirect
       tags: [Router]
-      summary: Kısaltılmış linki ana linke yönlendir
+      summary: Kısaltılmış linki hedef adrese yönlendir
       description: >
-        302 Found ile yönlendirir. Tıklama istatistiklerinin kaçırılmaması için
-        301 kullanılmaz; yanıtta Cache-Control no-store, no-cache bulunur.
+        Şifresiz linklerde 302 Found ile doğrudan hedef adrese yönlendirir.
+        Şifreli linklerde kullanıcıyı şifre çözme ekranına yönlendirir veya 403 döner.
+        Tıklama istatistiklerinin kaçırılmaması için 301 kullanılmaz; yanıtta Cache-Control no-store, no-cache bulunur.
       parameters:
         - name: link
           in: path
@@ -34,34 +42,77 @@ paths:
             type: string
       responses:
         '302':
-          description: Found
+          description: Hedef adrese yönlendirildi
           headers:
             Location:
               schema:
                 type: string
+                example: https://magaza.example.com/kampanyalar/yaz-indirimi
             Cache-Control:
               schema:
                 type: string
                 example: no-store, no-cache
+        '404':
+          description: Kısa link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /{link}/unlock:
     post:
       operationId: unlock
       tags: [Router]
-      summary: Şifreli linkin kilidini aç ve yönlendir
+      summary: Şifreli linkin kilidini aç ve hedef adresi döndür / yönlendir
       parameters:
         - name: link
           in: path
           required: true
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnlockLinkRequest'
       responses:
+        '200':
+          description: Parola doğrulandı, hedef adres döndürüldü
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnlockLinkResponse'
         '302':
-          description: Found
+          description: Parola doğrulandı, hedef adrese yönlendirildi
+          headers:
+            Location:
+              schema:
+                type: string
+        '400':
+          description: Geçersiz istek verisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Hatalı parola
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Kısa link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /{link}/preview:
     get:
       operationId: preview
       tags: [Router]
-      summary: Linkin nereye götürdüğünü önizle
+      summary: Kısa linkin nereye götürdüğünü önizle
       parameters:
         - name: link
           in: path
@@ -70,4 +121,66 @@ paths:
             type: string
       responses:
         '200':
-          description: OK
+          description: Link önizleme bilgisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkPreview'
+        '404':
+          description: Kısa link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+components:
+  schemas:
+    ApiError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: link_not_found
+        message:
+          type: string
+          example: Aradığınız kısa link bulunamadı.
+
+    UnlockLinkRequest:
+      type: object
+      required:
+        - password
+      properties:
+        password:
+          type: string
+          example: gizli123
+
+    UnlockLinkResponse:
+      type: object
+      required:
+        - target
+      properties:
+        target:
+          type: string
+          format: uri
+          example: https://magaza.example.com/kampanyalar/yaz-indirimi
+
+    LinkPreview:
+      type: object
+      required:
+        - alias
+        - target
+        - locked
+      properties:
+        alias:
+          type: string
+          example: kampanya-yaz
+        target:
+          type: string
+          description: Link şifreliyse güvenlik için boş döner.
+          example: https://magaza.example.com/kampanyalar/yaz-indirimi
+        locked:
+          type: boolean
+          example: false

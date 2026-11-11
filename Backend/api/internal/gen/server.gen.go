@@ -10,44 +10,186 @@ import (
 	"net/http"
 
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+// AliasCheckResult defines model for AliasCheckResult.
+type AliasCheckResult struct {
+	// Alias Example: kampanya-yaz
+	Alias string `json:"alias"`
+
+	// Available Example: true
+	Available bool `json:"available"`
+}
+
+// ApiError defines model for ApiError.
+type ApiError struct {
+	// Code Example: invalid_request
+	Code string `json:"code"`
+
+	// Fields Example: {"email":"Geçerli bir e-posta adresi giriniz."}
+	Fields *map[string]string `json:"fields,omitempty"`
+
+	// Message Example: Geçersiz istek parametreleri.
+	Message string `json:"message"`
+}
+
+// AuthResponse defines model for AuthResponse.
+type AuthResponse struct {
+	// Token Example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+	Token string `json:"token"`
+	User  User   `json:"user"`
+}
+
+// CreateLinkRequest defines model for CreateLinkRequest.
+type CreateLinkRequest struct {
+	// Alias Example: kampanya-yaz
+	Alias *string `json:"alias,omitempty"`
+
+	// Password Example: gizli123
+	Password *string `json:"password,omitempty"`
+
+	// Target Example: https://magaza.example.com/kampanyalar/yaz-indirimi
+	Target string `json:"target"`
+}
+
+// LinkItem defines model for LinkItem.
+type LinkItem struct {
+	// Alias Example: kampanya-yaz
+	Alias string `json:"alias"`
+
+	// Clicks Example: 1284
+	Clicks int64 `json:"clicks"`
+
+	// CreatedAt Example: 2026-10-02
+	CreatedAt string `json:"createdAt"`
+
+	// Id Example: 1
+	Id string `json:"id"`
+
+	// Locked Example: false
+	Locked bool `json:"locked"`
+
+	// Target Example: https://magaza.example.com/kampanyalar/yaz-indirimi
+	Target string `json:"target"`
+}
+
+// LoginRequest defines model for LoginRequest.
+type LoginRequest struct {
+	// Email Example: aziz@makeitiny.com
+	Email openapi_types.Email `json:"email"`
+
+	// Password Example: GucluSifre123
+	Password string `json:"password"`
+}
+
+// MessageResponse defines model for MessageResponse.
+type MessageResponse struct {
+	// Message Example: İşlem başarıyla tamamlandı.
+	Message string `json:"message"`
+}
+
+// RegisterRequest defines model for RegisterRequest.
+type RegisterRequest struct {
+	// Email Example: aziz@makeitiny.com
+	Email openapi_types.Email `json:"email"`
+
+	// Name Example: aziz
+	Name *string `json:"name,omitempty"`
+
+	// Password Example: GucluSifre123
+	Password string `json:"password"`
+}
+
+// ResetPasswordRequest defines model for ResetPasswordRequest.
+type ResetPasswordRequest struct {
+	// Email Example: aziz@makeitiny.com
+	Email openapi_types.Email `json:"email"`
+
+	// NewPassword Example: YeniGucluSifre123
+	NewPassword string `json:"newPassword"`
+}
+
+// UpdateLinkRequest defines model for UpdateLinkRequest.
+type UpdateLinkRequest struct {
+	// Alias Example: yeni-kampanya
+	Alias *string `json:"alias,omitempty"`
+
+	// Password Boş string gönderilirse parola kaldırılır, dolu gönderilirse güncellenir.
+	//
+	// Example: yeniSifre123
+	Password *string `json:"password,omitempty"`
+
+	// Target Example: https://magaza.example.com/yeni-hedef
+	Target *string `json:"target,omitempty"`
+}
+
+// User defines model for User.
+type User struct {
+	// Email Example: aziz@makeitiny.com
+	Email openapi_types.Email `json:"email"`
+
+	// Id Example: 1
+	Id string `json:"id"`
+
+	// Name Example: aziz
+	Name string `json:"name"`
+}
+
+// LoginJSONRequestBody defines body for Login for application/json ContentType.
+type LoginJSONRequestBody = LoginRequest
+
+// RegisterJSONRequestBody defines body for Register for application/json ContentType.
+type RegisterJSONRequestBody = RegisterRequest
+
+// ResetPasswordJSONRequestBody defines body for ResetPassword for application/json ContentType.
+type ResetPasswordJSONRequestBody = ResetPasswordRequest
+
+// CreateLinkJSONRequestBody defines body for CreateLink for application/json ContentType.
+type CreateLinkJSONRequestBody = CreateLinkRequest
+
+// UpdateLinkJSONRequestBody defines body for UpdateLink for application/json ContentType.
+type UpdateLinkJSONRequestBody = UpdateLinkRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// Login Giriş yap
+	// Login Kullanıcı girişi yap
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
-	// Logout Çıkış yap
+	// Logout Oturumu sonlandır
 	// (POST /auth/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
-	// Register Kayıt ol
+	// Register Yeni kullanıcı kaydı oluştur
 	// (POST /auth/register)
 	Register(w http.ResponseWriter, r *http.Request)
-	// ResetPassword Şifre sıfırla
+	// ResetPassword Kullanıcı şifresini değiştir / sıfırla
 	// (POST /auth/resetpass)
 	ResetPassword(w http.ResponseWriter, r *http.Request)
-	// GetCurrentUser Oturumdaki kullanıcı bilgisi
+	// DeleteUser Oturumdaki kullanıcının hesabını ve tüm linklerini sil
+	// (DELETE /auth/user)
+	DeleteUser(w http.ResponseWriter, r *http.Request)
+	// GetCurrentUser Oturumdaki kullanıcı bilgisini getir
 	// (GET /auth/user)
 	GetCurrentUser(w http.ResponseWriter, r *http.Request)
 	// GetHealth Sağlık kontrolü
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
-	// ListLinks Kullanıcıya ait kısaltılmış linkler
+	// ListLinks Oturumdaki kullanıcıya ait kısaltılmış linkleri listele
 	// (GET /links)
 	ListLinks(w http.ResponseWriter, r *http.Request)
-	// CreateLink Link kısalt
+	// CreateLink Yeni kısa link oluştur
 	// (POST /links)
 	CreateLink(w http.ResponseWriter, r *http.Request)
-	// CheckAlias Custom alias dolu mu kontrol et
+	// CheckAlias Özel takma ad (custom alias) müsait mi kontrol et
 	// (GET /links/check-alias/{alias})
 	CheckAlias(w http.ResponseWriter, r *http.Request, alias string)
-	// DeleteLink Linki sil
+	// DeleteLink Kullanıcıya ait bir linki sil
 	// (DELETE /links/{id})
 	DeleteLink(w http.ResponseWriter, r *http.Request, id string)
-	// GetLink Kullanıcıya ait tek bir link
+	// GetLink Kullanıcıya ait tek bir linkin detayını getir
 	// (GET /links/{id})
 	GetLink(w http.ResponseWriter, r *http.Request, id string)
-	// UpdateLink Linki düzenle
+	// UpdateLink Mevcut bir linki düzenle (hedef URL, alias veya parola)
 	// (PATCH /links/{id})
 	UpdateLink(w http.ResponseWriter, r *http.Request, id string)
 }
@@ -108,6 +250,20 @@ func (siw *ServerInterfaceWrapper) ResetPassword(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ResetPassword(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteUser operation middleware
+func (siw *ServerInterfaceWrapper) DeleteUser(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteUser(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -398,10 +554,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/health", wrapper.GetHealth)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/register", wrapper.Register)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/login", wrapper.Login)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/logout", wrapper.Logout)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/register", wrapper.Register)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/resetpass", wrapper.ResetPassword)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/auth/user", wrapper.DeleteUser)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/user", wrapper.GetCurrentUser)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links", wrapper.ListLinks)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/links", wrapper.CreateLink)
