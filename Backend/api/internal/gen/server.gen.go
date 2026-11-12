@@ -51,6 +51,12 @@ type CreateLinkRequest struct {
 
 	// Target Example: https://magaza.example.com/kampanyalar/yaz-indirimi
 	Target string `json:"target"`
+
+	// WaitEnabled Example: false
+	WaitEnabled *bool `json:"waitEnabled,omitempty"`
+
+	// WaitSeconds Example: 5
+	WaitSeconds *int32 `json:"waitSeconds,omitempty"`
 }
 
 // LinkItem defines model for LinkItem.
@@ -72,6 +78,45 @@ type LinkItem struct {
 
 	// Target Example: https://magaza.example.com/kampanyalar/yaz-indirimi
 	Target string `json:"target"`
+
+	// WaitEnabled Example: false
+	WaitEnabled bool `json:"waitEnabled"`
+
+	// WaitSeconds Example: 0
+	WaitSeconds int32 `json:"waitSeconds"`
+}
+
+// LinkLogItem defines model for LinkLogItem.
+type LinkLogItem struct {
+	// AcceptLanguage Example: tr-TR
+	AcceptLanguage string `json:"acceptLanguage"`
+
+	// Browser Example: Chrome
+	Browser string `json:"browser"`
+
+	// ClickedAt Example: 2026-11-12 11:45:00
+	ClickedAt string `json:"clickedAt"`
+
+	// DeviceType Example: Masaüstü
+	DeviceType string `json:"deviceType"`
+
+	// Id Example: 10
+	Id string `json:"id"`
+
+	// IpAddress Example: 127.0.0.1
+	IpAddress string `json:"ipAddress"`
+
+	// LinkId Example: 1
+	LinkId string `json:"linkId"`
+
+	// Os Example: Windows
+	Os string `json:"os"`
+
+	// Referer Example: Doğrudan
+	Referer string `json:"referer"`
+
+	// UserAgent Example: Mozilla/5.0 (Windows NT 10.0; Win64; x64)...
+	UserAgent string `json:"userAgent"`
 }
 
 // LoginRequest defines model for LoginRequest.
@@ -122,6 +167,12 @@ type UpdateLinkRequest struct {
 
 	// Target Example: https://magaza.example.com/yeni-hedef
 	Target *string `json:"target,omitempty"`
+
+	// WaitEnabled Example: true
+	WaitEnabled *bool `json:"waitEnabled,omitempty"`
+
+	// WaitSeconds Example: 10
+	WaitSeconds *int32 `json:"waitSeconds,omitempty"`
 }
 
 // User defines model for User.
@@ -183,6 +234,9 @@ type ServerInterface interface {
 	// CheckAlias Özel takma ad (custom alias) müsait mi kontrol et
 	// (GET /links/check-alias/{alias})
 	CheckAlias(w http.ResponseWriter, r *http.Request, alias string)
+	// ListLinkLogs Kullanıcıya ait bir linkin tıklama loglarını listele
+	// (GET /links/logs/{id})
+	ListLinkLogs(w http.ResponseWriter, r *http.Request, id string)
 	// DeleteLink Kullanıcıya ait bir linki sil
 	// (DELETE /links/{id})
 	DeleteLink(w http.ResponseWriter, r *http.Request, id string)
@@ -346,6 +400,32 @@ func (siw *ServerInterfaceWrapper) CheckAlias(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CheckAlias(w, r, alias)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListLinkLogs operation middleware
+func (siw *ServerInterfaceWrapper) ListLinkLogs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLinkLogs(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -566,6 +646,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/links/{id}", wrapper.DeleteLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links/{id}", wrapper.GetLink)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/links/{id}", wrapper.UpdateLink)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links/logs/{id}", wrapper.ListLinkLogs)
 
 	return m
 }

@@ -27,10 +27,11 @@ var (
 	ErrPasswordTooShort   = errors.New("parola en az 4 karakter olmalıdır")
 	ErrInvalidInput       = errors.New("geçersiz istek verisi")
 
-	ErrAliasTaken       = errors.New("seçilen takma ad (alias) zaten kullanımda")
-	ErrInvalidAlias     = errors.New("takma ad 3-32 karakter olmalı ve yalnızca harf, rakam, tire (-) veya alt çizgi (_) içermelidir")
-	ErrInvalidTargetURL = errors.New("geçerli bir hedef web adresi giriniz (örn. ornek.com)")
-	ErrLinkNotFound     = errors.New("link bulunamadı")
+	ErrAliasTaken         = errors.New("seçilen takma ad (alias) zaten kullanımda")
+	ErrInvalidAlias       = errors.New("takma ad 3-32 karakter olmalı ve yalnızca harf, rakam, tire (-) veya alt çizgi (_) içermelidir")
+	ErrInvalidTargetURL   = errors.New("geçerli bir hedef web adresi giriniz (örn. ornek.com)")
+	ErrInvalidWaitSeconds = errors.New("bekletme açıkken bekleme süresi en az 1 saniye olmalıdır")
+	ErrLinkNotFound       = errors.New("link bulunamadı")
 )
 
 const (
@@ -231,7 +232,7 @@ func generateBase62(length int) (string, error) {
 	return string(b), nil
 }
 
-func (s *LinkService) CreateLink(ctx context.Context, userID int64, target string, customAlias *string, password *string) (db.Link, error) {
+func (s *LinkService) CreateLink(ctx context.Context, userID int64, target string, customAlias *string, password *string, waitEnabled *bool, waitSeconds *int32) (db.Link, error) {
 	cleanTarget, err := validateTargetURL(target)
 	if err != nil {
 		return db.Link{}, err
@@ -280,11 +281,24 @@ func (s *LinkService) CreateLink(ctx context.Context, userID int64, target strin
 		pwHash = pgtype.Text{String: hashed, Valid: true}
 	}
 
+	// Şifre açıksa bekletme kesinlikle kapalı olur.
+	var finalWaitEnabled bool
+	var finalWaitSeconds int32
+	if !pwHash.Valid && waitEnabled != nil && *waitEnabled {
+		finalWaitEnabled = true
+		if waitSeconds == nil || *waitSeconds <= 0 {
+			return db.Link{}, ErrInvalidWaitSeconds
+		}
+		finalWaitSeconds = *waitSeconds
+	}
+
 	link, err := s.links.Create(ctx, db.CreateLinkParams{
 		UserID:       userID,
 		Alias:        finalAlias,
 		TargetUrl:    cleanTarget,
 		PasswordHash: pwHash,
+		WaitEnabled:  finalWaitEnabled,
+		WaitSeconds:  finalWaitSeconds,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -328,7 +342,7 @@ func (s *LinkService) GetLink(ctx context.Context, idStr string, userID int64) (
 	return link, nil
 }
 
-func (s *LinkService) UpdateLink(ctx context.Context, idStr string, userID int64, target, alias, password *string) (db.Link, error) {
+func (s *LinkService) UpdateLink(ctx context.Context, idStr string, userID int64, target, alias, password *string, waitEnabled *bool, waitSeconds *int32) (db.Link, error) {
 	id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
 	if err != nil {
 		return db.Link{}, ErrLinkNotFound
@@ -382,12 +396,34 @@ func (s *LinkService) UpdateLink(ctx context.Context, idStr string, userID int64
 		}
 	}
 
+	newWaitEnabled := existing.WaitEnabled
+	if waitEnabled != nil {
+		newWaitEnabled = *waitEnabled
+	}
+
+	newWaitSeconds := existing.WaitSeconds
+	if waitSeconds != nil {
+		newWaitSeconds = *waitSeconds
+	}
+
+	// Şifre + bekletme aynı anda açık olamaz: şifre aktifse bekletme kapatılır.
+	if newPwHash.Valid && newPwHash.String != "" {
+		newWaitEnabled = false
+		newWaitSeconds = 0
+	} else if !newWaitEnabled {
+		newWaitSeconds = 0
+	} else if newWaitSeconds <= 0 {
+		return db.Link{}, ErrInvalidWaitSeconds
+	}
+
 	updated, err := s.links.Update(ctx, existing.Alias, db.UpdateLinkParams{
 		ID:           existing.ID,
 		UserID:       userID,
 		Alias:        newAlias,
 		TargetUrl:    newTarget,
 		PasswordHash: newPwHash,
+		WaitEnabled:  newWaitEnabled,
+		WaitSeconds:  newWaitSeconds,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -398,6 +434,14 @@ func (s *LinkService) UpdateLink(ctx context.Context, idStr string, userID int64
 	}
 
 	return updated, nil
+}
+
+func (s *LinkService) ListLinkLogs(ctx context.Context, idStr string, userID int64) ([]db.Log, error) {
+	link, err := s.GetLink(ctx, idStr, userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.links.ListLogsByLink(ctx, link.ID)
 }
 
 func (s *LinkService) DeleteLink(ctx context.Context, idStr string, userID int64) error {

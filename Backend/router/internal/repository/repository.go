@@ -24,6 +24,8 @@ type LinkRecord struct {
 	TargetURL    string
 	PasswordHash string
 	Clicks       int64
+	WaitEnabled  bool
+	WaitSeconds  int32
 }
 
 // LinkRepository link verisine erişim katmanı (Redis Hash + PostgreSQL).
@@ -47,6 +49,8 @@ func (r *LinkRepository) GetByAlias(ctx context.Context, alias string) (LinkReco
 			id, _ := strconv.ParseInt(vals["id"], 10, 64)
 			userID, _ := strconv.ParseInt(vals["user_id"], 10, 64)
 			clicks, _ := strconv.ParseInt(vals["clicks"], 10, 64)
+			waitEnabled, _ := strconv.ParseBool(vals["wait_enabled"])
+			waitSeconds, _ := strconv.ParseInt(vals["wait_seconds"], 10, 32)
 			return LinkRecord{
 				ID:           id,
 				UserID:       userID,
@@ -54,6 +58,8 @@ func (r *LinkRepository) GetByAlias(ctx context.Context, alias string) (LinkReco
 				TargetURL:    vals["target_url"],
 				PasswordHash: vals["password_hash"],
 				Clicks:       clicks,
+				WaitEnabled:  waitEnabled,
+				WaitSeconds:  int32(waitSeconds),
 			}, nil
 		}
 	}
@@ -75,6 +81,8 @@ func (r *LinkRepository) GetByAlias(ctx context.Context, alias string) (LinkReco
 		TargetURL:    link.TargetUrl,
 		PasswordHash: pwHash,
 		Clicks:       link.Clicks,
+		WaitEnabled:  link.WaitEnabled,
+		WaitSeconds:  link.WaitSeconds,
 	}
 
 	if r.redis != nil {
@@ -85,6 +93,8 @@ func (r *LinkRepository) GetByAlias(ctx context.Context, alias string) (LinkReco
 			"target_url":    rec.TargetURL,
 			"password_hash": rec.PasswordHash,
 			"clicks":        strconv.FormatInt(rec.Clicks, 10),
+			"wait_enabled":  strconv.FormatBool(rec.WaitEnabled),
+			"wait_seconds":  strconv.FormatInt(int64(rec.WaitSeconds), 10),
 		}).Err()
 		if err != nil {
 			log.Printf("router redis HSET uyarısı (%s): %v", key, err)
@@ -114,4 +124,13 @@ func (r *LinkRepository) IncrementClicks(ctx context.Context, alias string) erro
 	}
 
 	return nil
+}
+
+// CreateLog tıklayan cihazın bilgilerini PostgreSQL logs tablosuna kaydeder.
+func (r *LinkRepository) CreateLog(ctx context.Context, params db.CreateLogParams) error {
+	_, err := r.q.CreateLog(ctx, params)
+	if err != nil {
+		log.Printf("router log kaydı uyarısı (link_id=%d): %v", params.LinkID, err)
+	}
+	return err
 }

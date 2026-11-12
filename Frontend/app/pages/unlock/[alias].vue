@@ -1,4 +1,7 @@
 <script setup lang="ts">
+// NOT (TODO): Şifreli linklerde şifre çözülmese bile ilk yönlendirme (/r/:alias) anında
+// tıklama sayısı artırılmakta ve cihaz logu tutulmaktadır. İleride şifre doğrulama
+// durumuna göre tıklama/log davranışı detaylı olarak ele alınacaktır.
 definePageMeta({ layout: 'marketing' })
 
 const route = useRoute()

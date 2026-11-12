@@ -4,21 +4,42 @@ const { addLink } = useLinks()
 const target = ref('')
 const alias = ref('')
 const password = ref('')
+const waitEnabled = ref(false)
+const waitSeconds = ref('5')
 const errorMsg = ref('')
 const loading = ref(false)
+
+const hasPassword = computed(() => password.value.trim().length > 0)
+
+watch(hasPassword, (active) => {
+  if (active) {
+    waitEnabled.value = false
+  }
+})
 
 async function submit() {
   if (!target.value.trim()) {
     errorMsg.value = 'Lütfen kısaltmak istediğiniz hedef adresi girin.'
     return
   }
+
+  const parsedSeconds = Number.parseInt(String(waitSeconds.value), 10)
+  const finalWaitEnabled = !hasPassword.value && waitEnabled.value
+
+  if (finalWaitEnabled && (!Number.isFinite(parsedSeconds) || parsedSeconds < 1)) {
+    errorMsg.value = 'Bekletme açıkken bekleme süresi en az 1 saniye olmalıdır.'
+    return
+  }
+
   errorMsg.value = ''
   loading.value = true
   try {
     const created = await addLink({
       target: target.value,
       alias: alias.value.trim() || undefined,
-      password: password.value || undefined
+      password: password.value || undefined,
+      waitEnabled: finalWaitEnabled,
+      waitSeconds: finalWaitEnabled ? parsedSeconds : 0
     })
     await navigateTo(`/dashboard/links/${created.id}`)
   } catch (e: any) {
@@ -56,8 +77,45 @@ async function submit() {
       label="Parola (isteğe bağlı)"
       type="password"
       placeholder="İsteğe bağlı parola"
-      hint="Doluysa link Argon2id ile şifreli olur."
+      hint="Doluysa link Argon2id ile şifreli olur. Şifre açıkken ara bekletme sayfası kapatılır."
     />
+
+    <div class="rounded-md border border-line bg-paper p-4">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-semibold">Ara Bekletme Sayfası (/w)</p>
+          <p class="mt-0.5 text-xs text-ink-3">
+            <template v-if="hasPassword">
+              Şifre koruması girildiği için ara bekletme sayfası devre dışıdır (şifre ve bekletme aynı anda açık olamaz).
+            </template>
+            <template v-else>
+              Açık olduğunda ziyaretçiler hedef adrese gitmeden önce <span class="font-mono">/w</span> ara sayfasında belirttiğiniz süre kadar bekletilir (reklam gösterim alanı).
+            </template>
+          </p>
+        </div>
+        <label class="inline-flex shrink-0 cursor-pointer items-center gap-2 select-none" :class="{ 'cursor-not-allowed opacity-50': hasPassword }">
+          <input
+            v-model="waitEnabled"
+            type="checkbox"
+            :disabled="hasPassword"
+            class="h-4 w-4 accent-accent"
+          />
+          <span class="text-xs font-semibold">{{ waitEnabled && !hasPassword ? 'Açık' : 'Kapalı' }}</span>
+        </label>
+      </div>
+
+      <div v-if="waitEnabled && !hasPassword" class="mt-3">
+        <UiField
+          id="new-wait-seconds"
+          v-model="waitSeconds"
+          label="Bekleme Süresi (saniye)"
+          type="number"
+          placeholder="5"
+          hint="Kullanıcının ara sayfada kaç saniye bekletileceğini girin."
+        />
+      </div>
+    </div>
+
     <div class="flex gap-3">
       <UiButton type="submit">{{ loading ? 'Oluşturuluyor...' : 'Linki oluştur' }}</UiButton>
       <UiButton to="/dashboard/links" variant="ghost">Vazgeç</UiButton>

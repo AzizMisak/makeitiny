@@ -26,6 +26,7 @@ async function copy() {
             {{ displayShortUrl }}
           </span>
           <UiBadge v-if="link.locked" tone="accent"><UiIcon name="lock" :size="11" /> şifreli</UiBadge>
+          <UiBadge v-else-if="link.waitEnabled" tone="neutral"><UiIcon name="clock" :size="11" /> {{ link.waitSeconds }} sn bekletmeli</UiBadge>
         </div>
         <p class="mt-1 truncate text-sm text-ink-3" :title="link.target">{{ link.target }}</p>
       </NuxtLink>

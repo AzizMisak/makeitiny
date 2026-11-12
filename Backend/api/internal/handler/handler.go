@@ -64,12 +64,33 @@ func toLinkItem(l db.Link) gen.LinkItem {
 		createdAt = l.CreatedAt.Time.Format("2006-01-02")
 	}
 	return gen.LinkItem{
-		Id:        strconv.FormatInt(l.ID, 10),
-		Alias:     l.Alias,
-		Target:    l.TargetUrl,
-		Clicks:    l.Clicks,
-		Locked:    l.PasswordHash.Valid && l.PasswordHash.String != "",
-		CreatedAt: createdAt,
+		Id:          strconv.FormatInt(l.ID, 10),
+		Alias:       l.Alias,
+		Target:      l.TargetUrl,
+		Clicks:      l.Clicks,
+		Locked:      l.PasswordHash.Valid && l.PasswordHash.String != "",
+		WaitEnabled: l.WaitEnabled,
+		WaitSeconds: l.WaitSeconds,
+		CreatedAt:   createdAt,
+	}
+}
+
+func toLinkLogItem(lg db.Log) gen.LinkLogItem {
+	clickedAt := ""
+	if lg.ClickedAt.Valid {
+		clickedAt = lg.ClickedAt.Time.Local().Format("2006-01-02 15:04:05")
+	}
+	return gen.LinkLogItem{
+		Id:             strconv.FormatInt(lg.ID, 10),
+		LinkId:         strconv.FormatInt(lg.LinkID, 10),
+		IpAddress:      lg.IpAddress,
+		UserAgent:      lg.UserAgent,
+		DeviceType:     lg.DeviceType,
+		Browser:        lg.Browser,
+		Os:             lg.Os,
+		Referer:        lg.Referer,
+		AcceptLanguage: lg.AcceptLanguage,
+		ClickedAt:      clickedAt,
 	}
 }
 
@@ -232,10 +253,10 @@ func (h *Handler) CreateLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	link, err := h.links.CreateLink(r.Context(), claims.UserID, req.Target, req.Alias, req.Password)
+	link, err := h.links.CreateLink(r.Context(), claims.UserID, req.Target, req.Alias, req.Password, req.WaitEnabled, req.WaitSeconds)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrInvalidTargetURL), errors.Is(err, service.ErrInvalidAlias):
+		case errors.Is(err, service.ErrInvalidTargetURL), errors.Is(err, service.ErrInvalidAlias), errors.Is(err, service.ErrInvalidWaitSeconds):
 			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		case errors.Is(err, service.ErrAliasTaken):
 			writeError(w, http.StatusConflict, "alias_taken", err.Error())
@@ -324,12 +345,12 @@ func (h *Handler) UpdateLink(w http.ResponseWriter, r *http.Request, id string) 
 		return
 	}
 
-	updated, err := h.links.UpdateLink(r.Context(), id, claims.UserID, req.Target, req.Alias, req.Password)
+	updated, err := h.links.UpdateLink(r.Context(), id, claims.UserID, req.Target, req.Alias, req.Password, req.WaitEnabled, req.WaitSeconds)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrLinkNotFound):
 			writeError(w, http.StatusNotFound, "link_not_found", err.Error())
-		case errors.Is(err, service.ErrInvalidTargetURL), errors.Is(err, service.ErrInvalidAlias):
+		case errors.Is(err, service.ErrInvalidTargetURL), errors.Is(err, service.ErrInvalidAlias), errors.Is(err, service.ErrInvalidWaitSeconds):
 			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		case errors.Is(err, service.ErrAliasTaken):
 			writeError(w, http.StatusConflict, "alias_taken", err.Error())
@@ -340,6 +361,31 @@ func (h *Handler) UpdateLink(w http.ResponseWriter, r *http.Request, id string) 
 	}
 
 	writeJSON(w, http.StatusOK, toLinkItem(updated))
+}
+
+func (h *Handler) ListLinkLogs(w http.ResponseWriter, r *http.Request, id string) {
+	claims, err := h.authenticate(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Oturum doğrulaması başarısız.")
+		return
+	}
+
+	logs, err := h.links.ListLinkLogs(r.Context(), id, claims.UserID)
+	if err != nil {
+		if errors.Is(err, service.ErrLinkNotFound) {
+			writeError(w, http.StatusNotFound, "link_not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Tıklama logları alınamadı.")
+		return
+	}
+
+	items := make([]gen.LinkLogItem, 0, len(logs))
+	for _, lg := range logs {
+		items = append(items, toLinkLogItem(lg))
+	}
+
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (h *Handler) DeleteLink(w http.ResponseWriter, r *http.Request, id string) {

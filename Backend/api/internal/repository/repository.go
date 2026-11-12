@@ -102,6 +102,8 @@ func (r *LinkRepository) syncToRedis(ctx context.Context, link db.Link) {
 		"target_url":    link.TargetUrl,
 		"password_hash": pwHash,
 		"clicks":        strconv.FormatInt(link.Clicks, 10),
+		"wait_enabled":  strconv.FormatBool(link.WaitEnabled),
+		"wait_seconds":  strconv.FormatInt(int64(link.WaitSeconds), 10),
 	}).Err()
 	if err != nil {
 		log.Printf("redis HSET uyarısı (%s): %v", key, err)
@@ -183,4 +185,8 @@ func (r *LinkRepository) Delete(ctx context.Context, id, userID int64) (int64, e
 	}
 
 	return rows, nil
+}
+
+func (r *LinkRepository) ListLogsByLink(ctx context.Context, linkID int64) ([]db.Log, error) {
+	return r.q.ListLogsByLink(ctx, linkID)
 }

@@ -173,6 +173,8 @@ components:
         - alias
         - target
         - locked
+        - waitEnabled
+        - waitSeconds
       properties:
         alias:
           type: string
@@ -184,3 +186,10 @@ components:
         locked:
           type: boolean
           example: false
+        waitEnabled:
+          type: boolean
+          example: false
+        waitSeconds:
+          type: integer
+          format: int32
+          example: 0

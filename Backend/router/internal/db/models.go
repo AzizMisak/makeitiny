@@ -16,6 +16,21 @@ type Link struct {
 	PasswordHash pgtype.Text        `json:"password_hash"`
 	Clicks       int64              `json:"clicks"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	WaitEnabled  bool               `json:"wait_enabled"`
+	WaitSeconds  int32              `json:"wait_seconds"`
+}
+
+type Log struct {
+	ID             int64              `json:"id"`
+	LinkID         int64              `json:"link_id"`
+	IpAddress      string             `json:"ip_address"`
+	UserAgent      string             `json:"user_agent"`
+	DeviceType     string             `json:"device_type"`
+	Browser        string             `json:"browser"`
+	Os             string             `json:"os"`
+	Referer        string             `json:"referer"`
+	AcceptLanguage string             `json:"accept_language"`
+	ClickedAt      pgtype.Timestamptz `json:"clicked_at"`
 }
 
 type User struct {

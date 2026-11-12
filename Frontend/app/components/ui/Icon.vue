@@ -16,7 +16,9 @@ const icons: Record<string, string[]> = {
   trash: ['M4 7h16', 'M9 7V4h6v3', 'M6 7l1 13h10l1-13'],
   check: ['M5 12l5 5 9-10'],
   eye: ['M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z', 'M12 9a3 3 0 1 0 0 6a3 3 0 0 0 0-6'],
-  menu: ['M4 7h16', 'M4 12h16', 'M4 17h16']
+  menu: ['M4 7h16', 'M4 12h16', 'M4 17h16'],
+  clock: ['M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z', 'M12 6v6l4 2'],
+  refresh: ['M21 12a9 9 0 1 1-2.64-6.36', 'M21 3v6h-6']
 }
 
 const paths = computed(() => icons[props.name] ?? [])

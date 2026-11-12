@@ -33,6 +33,12 @@ type LinkPreview struct {
 	//
 	// Example: https://magaza.example.com/kampanyalar/yaz-indirimi
 	Target string `json:"target"`
+
+	// WaitEnabled Example: false
+	WaitEnabled bool `json:"waitEnabled"`
+
+	// WaitSeconds Example: 0
+	WaitSeconds int32 `json:"waitSeconds"`
 }
 
 // UnlockLinkRequest defines model for UnlockLinkRequest.

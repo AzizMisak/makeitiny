@@ -9,8 +9,61 @@ import (
 	"context"
 )
 
+const createLog = `-- name: CreateLog :one
+INSERT INTO logs (
+    link_id,
+    ip_address,
+    user_agent,
+    device_type,
+    browser,
+    os,
+    referer,
+    accept_language
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, link_id, ip_address, user_agent, device_type, browser, os, referer, accept_language, clicked_at
+`
+
+type CreateLogParams struct {
+	LinkID         int64  `json:"link_id"`
+	IpAddress      string `json:"ip_address"`
+	UserAgent      string `json:"user_agent"`
+	DeviceType     string `json:"device_type"`
+	Browser        string `json:"browser"`
+	Os             string `json:"os"`
+	Referer        string `json:"referer"`
+	AcceptLanguage string `json:"accept_language"`
+}
+
+func (q *Queries) CreateLog(ctx context.Context, arg CreateLogParams) (Log, error) {
+	row := q.db.QueryRow(ctx, createLog,
+		arg.LinkID,
+		arg.IpAddress,
+		arg.UserAgent,
+		arg.DeviceType,
+		arg.Browser,
+		arg.Os,
+		arg.Referer,
+		arg.AcceptLanguage,
+	)
+	var i Log
+	err := row.Scan(
+		&i.ID,
+		&i.LinkID,
+		&i.IpAddress,
+		&i.UserAgent,
+		&i.DeviceType,
+		&i.Browser,
+		&i.Os,
+		&i.Referer,
+		&i.AcceptLanguage,
+		&i.ClickedAt,
+	)
+	return i, err
+}
+
 const getLinkByAlias = `-- name: GetLinkByAlias :one
-SELECT id, user_id, alias, target_url, password_hash, clicks, created_at FROM links
+SELECT id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
 WHERE alias = $1
 LIMIT 1
 `
@@ -26,6 +79,8 @@ func (q *Queries) GetLinkByAlias(ctx context.Context, alias string) (Link, error
 		&i.PasswordHash,
 		&i.Clicks,
 		&i.CreatedAt,
+		&i.WaitEnabled,
+		&i.WaitSeconds,
 	)
 	return i, err
 }

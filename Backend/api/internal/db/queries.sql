@@ -23,8 +23,8 @@ DELETE FROM users
 WHERE id = $1;
 
 -- name: CreateLink :one
-INSERT INTO links (user_id, alias, target_url, password_hash)
-VALUES ($1, $2, $3, $4)
+INSERT INTO links (user_id, alias, target_url, password_hash, wait_enabled, wait_seconds)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: ListLinksByUser :many
@@ -51,10 +51,17 @@ SELECT EXISTS(
 UPDATE links
 SET alias = $3,
     target_url = $4,
-    password_hash = $5
+    password_hash = $5,
+    wait_enabled = $6,
+    wait_seconds = $7
 WHERE id = $1 AND user_id = $2
 RETURNING *;
 
 -- name: DeleteLink :execrows
 DELETE FROM links
 WHERE id = $1 AND user_id = $2;
+
+-- name: ListLogsByLink :many
+SELECT * FROM logs
+WHERE link_id = $1
+ORDER BY clicked_at DESC;

@@ -1,4 +1,4 @@
-import type { CreateLinkPayload, LinkItem, UpdateLinkPayload } from '~/types/link'
+import type { CreateLinkPayload, LinkItem, LinkLogItem, UpdateLinkPayload } from '~/types/link'
 
 export function normalizeTargetUrl(raw: string): string {
   const trimmed = raw.trim()
@@ -33,6 +33,10 @@ export function useLinks() {
       links.value = links.value.map((l) => (l.id === id ? item : l))
     }
     return item
+  }
+
+  async function getLinkLogs(id: string): Promise<LinkLogItem[]> {
+    return await useApi().get<LinkLogItem[]>(`/links/logs/${id}`)
   }
 
   async function addLink(input: CreateLinkPayload) {
@@ -73,6 +77,7 @@ export function useLinks() {
     totalClicks,
     fetchLinks,
     getLink,
+    getLinkLogs,
     addLink,
     updateLink,
     removeLink,

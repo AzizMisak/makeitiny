@@ -25,9 +25,9 @@ func (q *Queries) AliasExists(ctx context.Context, alias string) (bool, error) {
 }
 
 const createLink = `-- name: CreateLink :one
-INSERT INTO links (user_id, alias, target_url, password_hash)
-VALUES ($1, $2, $3, $4)
-RETURNING id, user_id, alias, target_url, password_hash, clicks, created_at
+INSERT INTO links (user_id, alias, target_url, password_hash, wait_enabled, wait_seconds)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds
 `
 
 type CreateLinkParams struct {
@@ -35,6 +35,8 @@ type CreateLinkParams struct {
 	Alias        string      `json:"alias"`
 	TargetUrl    string      `json:"target_url"`
 	PasswordHash pgtype.Text `json:"password_hash"`
+	WaitEnabled  bool        `json:"wait_enabled"`
+	WaitSeconds  int32       `json:"wait_seconds"`
 }
 
 func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, error) {
@@ -43,6 +45,8 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		arg.Alias,
 		arg.TargetUrl,
 		arg.PasswordHash,
+		arg.WaitEnabled,
+		arg.WaitSeconds,
 	)
 	var i Link
 	err := row.Scan(
@@ -53,6 +57,8 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		&i.PasswordHash,
 		&i.Clicks,
 		&i.CreatedAt,
+		&i.WaitEnabled,
+		&i.WaitSeconds,
 	)
 	return i, err
 }
@@ -114,7 +120,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id int64) (int64, error) {
 }
 
 const getLinkByAlias = `-- name: GetLinkByAlias :one
-SELECT id, user_id, alias, target_url, password_hash, clicks, created_at FROM links
+SELECT id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
 WHERE alias = $1
 LIMIT 1
 `
@@ -130,12 +136,14 @@ func (q *Queries) GetLinkByAlias(ctx context.Context, alias string) (Link, error
 		&i.PasswordHash,
 		&i.Clicks,
 		&i.CreatedAt,
+		&i.WaitEnabled,
+		&i.WaitSeconds,
 	)
 	return i, err
 }
 
 const getLinkByIDAndUser = `-- name: GetLinkByIDAndUser :one
-SELECT id, user_id, alias, target_url, password_hash, clicks, created_at FROM links
+SELECT id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
 WHERE id = $1 AND user_id = $2
 LIMIT 1
 `
@@ -156,6 +164,8 @@ func (q *Queries) GetLinkByIDAndUser(ctx context.Context, arg GetLinkByIDAndUser
 		&i.PasswordHash,
 		&i.Clicks,
 		&i.CreatedAt,
+		&i.WaitEnabled,
+		&i.WaitSeconds,
 	)
 	return i, err
 }
@@ -199,7 +209,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 }
 
 const listLinksByUser = `-- name: ListLinksByUser :many
-SELECT id, user_id, alias, target_url, password_hash, clicks, created_at FROM links
+SELECT id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
 WHERE user_id = $1
 ORDER BY created_at DESC
 `
@@ -221,6 +231,45 @@ func (q *Queries) ListLinksByUser(ctx context.Context, userID int64) ([]Link, er
 			&i.PasswordHash,
 			&i.Clicks,
 			&i.CreatedAt,
+			&i.WaitEnabled,
+			&i.WaitSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLogsByLink = `-- name: ListLogsByLink :many
+SELECT id, link_id, ip_address, user_agent, device_type, browser, os, referer, accept_language, clicked_at FROM logs
+WHERE link_id = $1
+ORDER BY clicked_at DESC
+`
+
+func (q *Queries) ListLogsByLink(ctx context.Context, linkID int64) ([]Log, error) {
+	rows, err := q.db.Query(ctx, listLogsByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Log
+	for rows.Next() {
+		var i Log
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.IpAddress,
+			&i.UserAgent,
+			&i.DeviceType,
+			&i.Browser,
+			&i.Os,
+			&i.Referer,
+			&i.AcceptLanguage,
+			&i.ClickedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -236,9 +285,11 @@ const updateLink = `-- name: UpdateLink :one
 UPDATE links
 SET alias = $3,
     target_url = $4,
-    password_hash = $5
+    password_hash = $5,
+    wait_enabled = $6,
+    wait_seconds = $7
 WHERE id = $1 AND user_id = $2
-RETURNING id, user_id, alias, target_url, password_hash, clicks, created_at
+RETURNING id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds
 `
 
 type UpdateLinkParams struct {
@@ -247,6 +298,8 @@ type UpdateLinkParams struct {
 	Alias        string      `json:"alias"`
 	TargetUrl    string      `json:"target_url"`
 	PasswordHash pgtype.Text `json:"password_hash"`
+	WaitEnabled  bool        `json:"wait_enabled"`
+	WaitSeconds  int32       `json:"wait_seconds"`
 }
 
 func (q *Queries) UpdateLink(ctx context.Context, arg UpdateLinkParams) (Link, error) {
@@ -256,6 +309,8 @@ func (q *Queries) UpdateLink(ctx context.Context, arg UpdateLinkParams) (Link, e
 		arg.Alias,
 		arg.TargetUrl,
 		arg.PasswordHash,
+		arg.WaitEnabled,
+		arg.WaitSeconds,
 	)
 	var i Link
 	err := row.Scan(
@@ -266,6 +321,8 @@ func (q *Queries) UpdateLink(ctx context.Context, arg UpdateLinkParams) (Link, e
 		&i.PasswordHash,
 		&i.Clicks,
 		&i.CreatedAt,
+		&i.WaitEnabled,
+		&i.WaitSeconds,
 	)
 	return i, err
 }
