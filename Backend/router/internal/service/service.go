@@ -6,7 +6,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/argon2"
@@ -16,11 +19,16 @@ import (
 )
 
 var (
-	ErrLinkNotFound    = errors.New("aradığınız kısa link bulunamadı")
-	ErrLinkLocked      = errors.New("bu kısa link parola korumalıdır")
-	ErrLinkWaiting     = errors.New("bu kısa link bekletme sayfasına yönlendiriliyor")
-	ErrInvalidPassword = errors.New("girdiğiniz parola hatalı")
+	ErrLinkNotFound      = errors.New("aradığınız kısa link bulunamadı")
+	ErrLinkLocked        = errors.New("bu kısa link parola korumalıdır")
+	ErrLinkWaiting       = errors.New("bu kısa link bekletme sayfasına yönlendiriliyor")
+	ErrInvalidPassword   = errors.New("girdiğiniz parola hatalı")
+	ErrTargetUnreachable = errors.New("hedef adrese ulaşılamıyor")
 )
+
+var targetCheckClient = &http.Client{
+	Timeout: 5 * time.Second,
+}
 
 // ClickLogMeta tıklayan cihazın HTTP isteğinden çıkarılan log verileri.
 type ClickLogMeta struct {
@@ -70,6 +78,10 @@ func (s *RedirectService) Resolve(ctx context.Context, alias string, meta ClickL
 		return "", ErrLinkLocked
 	}
 
+	if err := checkTargetReachable(ctx, rec.TargetURL); err != nil {
+		return "", ErrTargetUnreachable
+	}
+
 	if rec.WaitEnabled && rec.WaitSeconds > 0 {
 		return "", ErrLinkWaiting
 	}
@@ -95,7 +107,57 @@ func (s *RedirectService) Unlock(ctx context.Context, alias, password string) (s
 		}
 	}
 
+	if err := checkTargetReachable(ctx, rec.TargetURL); err != nil {
+		return "", ErrTargetUnreachable
+	}
+
 	return rec.TargetURL, nil
+}
+
+// checkTargetReachable hedef URL'in erişilebilir olup olmadığını hızlıca kontrol eder.
+func checkTargetReachable(ctx context.Context, rawURL string) error {
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(rawURL))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return ErrTargetUnreachable
+	}
+
+	headCtx, cancelHead := context.WithTimeout(ctx, 3*time.Second)
+	defer cancelHead()
+
+	reqHead, err := http.NewRequestWithContext(headCtx, http.MethodHead, parsed.String(), nil)
+	if err != nil {
+		return ErrTargetUnreachable
+	}
+	reqHead.Header.Set("User-Agent", "Mozilla/5.0 (compatible; MakeItTiny/1.0)")
+
+	resp, err := targetCheckClient.Do(reqHead)
+	if err == nil {
+		_ = resp.Body.Close()
+		if resp.StatusCode < 400 || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+			return nil
+		}
+	}
+
+	getCtx, cancelGet := context.WithTimeout(ctx, 3*time.Second)
+	defer cancelGet()
+
+	reqGet, err := http.NewRequestWithContext(getCtx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return ErrTargetUnreachable
+	}
+	reqGet.Header.Set("User-Agent", "Mozilla/5.0 (compatible; MakeItTiny/1.0)")
+
+	respGet, err := targetCheckClient.Do(reqGet)
+	if err != nil {
+		return ErrTargetUnreachable
+	}
+	_ = respGet.Body.Close()
+
+	if respGet.StatusCode == http.StatusNotFound || respGet.StatusCode >= http.StatusInternalServerError {
+		return ErrTargetUnreachable
+	}
+
+	return nil
 }
 
 // Preview kısa linkin önizleme bilgisini döner (şifreliyse hedef adresi gizler).

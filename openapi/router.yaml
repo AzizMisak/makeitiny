@@ -32,7 +32,8 @@ paths:
       summary: Kısaltılmış linki hedef adrese yönlendir
       description: >
         Şifresiz linklerde 302 Found ile doğrudan hedef adrese yönlendirir.
-        Şifreli linklerde kullanıcıyı şifre çözme ekranına yönlendirir veya 403 döner.
+        Şifreli linklerde kullanıcıyı şifre çözme ekranına (/unlock/{link}), bekletmeli linklerde bekletme ekranına (/w/{link}) yönlendirir.
+        Kısa link veritabanında bulunamadığında (/error/{link}?reason=not_found) veya hedef adrese ulaşılamadığında (/error/{link}?reason=unreachable) Frontend hata sayfasına yönlendirir.
         Tıklama istatistiklerinin kaçırılmaması için 301 kullanılmaz; yanıtta Cache-Control no-store, no-cache bulunur.
       parameters:
         - name: link
@@ -42,7 +43,7 @@ paths:
             type: string
       responses:
         '302':
-          description: Hedef adrese yönlendirildi
+          description: Hedef adrese veya ilgili Frontend ekranına (unlock / wait / error) yönlendirildi
           headers:
             Location:
               schema:
@@ -54,6 +55,12 @@ paths:
                 example: no-store, no-cache
         '404':
           description: Kısa link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '502':
+          description: Hedef adrese ulaşılamıyor
           content:
             application/json:
               schema:
@@ -107,6 +114,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '502':
+          description: Hedef adrese ulaşılamıyor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /{link}/preview:
     get:
@@ -128,6 +141,12 @@ paths:
                 $ref: '#/components/schemas/LinkPreview'
         '404':
           description: Kısa link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '502':
+          description: Hedef adrese ulaşılamıyor
           content:
             application/json:
               schema:

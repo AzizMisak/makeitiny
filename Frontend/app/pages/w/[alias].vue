@@ -60,6 +60,15 @@ async function initWaitPage() {
       }
     }, 1000)
   } catch (e: any) {
+    const code = e?.data?.code
+    if (code === 'link_not_found') {
+      await navigateTo(`/error/${alias.value}?reason=not_found`, { replace: true })
+      return
+    }
+    if (code === 'target_unreachable') {
+      await navigateTo(`/error/${alias.value}?reason=unreachable`, { replace: true })
+      return
+    }
     errorMsg.value = e?.data?.message ?? 'Aradığınız kısa link bulunamadı veya önizleme bilgisi alınamadı.'
   } finally {
     loading.value = false

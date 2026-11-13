@@ -25,7 +25,8 @@ export const dashboardNav: NavGroup[] = [
   }
 ]
 
-export const landingNav: { label: string; href: string }[] = [
-  { label: 'Özellikler', href: '/#ozellikler' },
-  { label: 'Nasıl çalışır', href: '/#nasil' }
+export const landingNav: { label: string; href: string; sectionId: string }[] = [
+  { label: 'Özellikler', href: '/#ozellikler', sectionId: 'ozellikler' },
+  { label: 'Analitik & Loglar', href: '/#analitik', sectionId: 'analitik' },
+  { label: 'Nasıl çalışır', href: '/#nasil', sectionId: 'nasil' }
 ]

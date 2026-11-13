@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"makeitiny/router/internal/gen"
@@ -51,25 +52,38 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 // Redirect: Şifresiz ve bekletmesiz linklerde 302 Found + Cache-Control: no-store, no-cache ile hedef URL'e yönlendirir.
 // Şifreli linklerde kullanıcıyı Frontend üzerindeki /unlock/{link} ekranına yönlendirir.
 // Bekletme açık olan linklerde kullanıcıyı Frontend üzerindeki /w/{link} ekranına yönlendirir.
+// Kısa link bulunamadığında veya hedef adrese ulaşılamadığında Frontend üzerindeki /error/{link} hata sayfasına yönlendirir.
 func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request, link string) {
 	meta := extractClickMeta(r)
 	target, err := h.redirects.Resolve(r.Context(), link, meta)
 	if err != nil {
+		escapedLink := url.PathEscape(link)
 		switch {
 		case errors.Is(err, service.ErrLinkLocked):
-			unlockURL := h.frontendURL + "/unlock/" + link
+			unlockURL := h.frontendURL + "/unlock/" + escapedLink
 			w.Header().Set("Cache-Control", "no-store, no-cache")
 			w.Header().Set("Location", unlockURL)
 			w.WriteHeader(http.StatusFound)
 		case errors.Is(err, service.ErrLinkWaiting):
-			waitURL := h.frontendURL + "/w/" + link
+			waitURL := h.frontendURL + "/w/" + escapedLink
 			w.Header().Set("Cache-Control", "no-store, no-cache")
 			w.Header().Set("Location", waitURL)
 			w.WriteHeader(http.StatusFound)
 		case errors.Is(err, service.ErrLinkNotFound):
-			writeError(w, http.StatusNotFound, "link_not_found", "Aradığınız kısa link bulunamadı.")
+			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=not_found"
+			w.Header().Set("Cache-Control", "no-store, no-cache")
+			w.Header().Set("Location", errURL)
+			w.WriteHeader(http.StatusFound)
+		case errors.Is(err, service.ErrTargetUnreachable):
+			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=unreachable"
+			w.Header().Set("Cache-Control", "no-store, no-cache")
+			w.Header().Set("Location", errURL)
+			w.WriteHeader(http.StatusFound)
 		default:
-			writeError(w, http.StatusInternalServerError, "internal_error", "Yönlendirme sırasında bir hata oluştu.")
+			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=internal"
+			w.Header().Set("Cache-Control", "no-store, no-cache")
+			w.Header().Set("Location", errURL)
+			w.WriteHeader(http.StatusFound)
 		}
 		return
 	}
@@ -93,6 +107,8 @@ func (h *Handler) Unlock(w http.ResponseWriter, r *http.Request, link string) {
 			writeError(w, http.StatusUnauthorized, "invalid_password", "Girdiğiniz parola hatalı.")
 		case errors.Is(err, service.ErrLinkNotFound):
 			writeError(w, http.StatusNotFound, "link_not_found", "Aradığınız kısa link bulunamadı.")
+		case errors.Is(err, service.ErrTargetUnreachable):
+			writeError(w, http.StatusBadGateway, "target_unreachable", "Bu kısa linkin yönlendirdiği hedef adrese şu anda ulaşılamıyor.")
 		default:
 			writeError(w, http.StatusInternalServerError, "internal_error", "Kilit açma işlemi sırasında bir hata oluştu.")
 		}
