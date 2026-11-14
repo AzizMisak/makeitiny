@@ -9,15 +9,25 @@ import (
 )
 
 type Link struct {
-	ID           int64              `json:"id"`
-	UserID       int64              `json:"user_id"`
-	Alias        string             `json:"alias"`
-	TargetUrl    string             `json:"target_url"`
-	PasswordHash pgtype.Text        `json:"password_hash"`
-	Clicks       int64              `json:"clicks"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	WaitEnabled  bool               `json:"wait_enabled"`
-	WaitSeconds  int32              `json:"wait_seconds"`
+	ID                int64              `json:"id"`
+	UserID            int64              `json:"user_id"`
+	Alias             string             `json:"alias"`
+	TargetUrl         string             `json:"target_url"`
+	PasswordHash      pgtype.Text        `json:"password_hash"`
+	Clicks            int64              `json:"clicks"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	WaitEnabled       bool               `json:"wait_enabled"`
+	WaitSeconds       int32              `json:"wait_seconds"`
+	PublicID          string             `json:"public_id"`
+	Title             string             `json:"title"`
+	IsActive          bool               `json:"is_active"`
+	ExpiresAt         pgtype.Timestamptz `json:"expires_at"`
+	MaxClicks         pgtype.Int8        `json:"max_clicks"`
+	AdEnabled         bool               `json:"ad_enabled"`
+	SecurityStatus    string             `json:"security_status"`
+	SecurityCheckedAt pgtype.Timestamptz `json:"security_checked_at"`
+	QrCodePath        string             `json:"qr_code_path"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Log struct {
@@ -31,12 +41,17 @@ type Log struct {
 	Referer        string             `json:"referer"`
 	AcceptLanguage string             `json:"accept_language"`
 	ClickedAt      pgtype.Timestamptz `json:"clicked_at"`
+	CountryCode    string             `json:"country_code"`
 }
 
 type User struct {
-	ID           int64              `json:"id"`
-	Name         string             `json:"name"`
-	Email        string             `json:"email"`
-	PasswordHash string             `json:"password_hash"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	ID            int64              `json:"id"`
+	Name          string             `json:"name"`
+	Email         string             `json:"email"`
+	PasswordHash  string             `json:"password_hash"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	PlanID        int32              `json:"plan_id"`
+	PlanExpiresAt pgtype.Timestamptz `json:"plan_expires_at"`
+	IsActive      bool               `json:"is_active"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }

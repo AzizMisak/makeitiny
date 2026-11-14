@@ -64,7 +64,7 @@ func toLinkItem(l db.Link) gen.LinkItem {
 		createdAt = l.CreatedAt.Time.Format("2006-01-02")
 	}
 	return gen.LinkItem{
-		Id:          strconv.FormatInt(l.ID, 10),
+		Id:          l.PublicID,
 		Alias:       l.Alias,
 		Target:      l.TargetUrl,
 		Clicks:      l.Clicks,
@@ -75,14 +75,14 @@ func toLinkItem(l db.Link) gen.LinkItem {
 	}
 }
 
-func toLinkLogItem(lg db.Log) gen.LinkLogItem {
+func toLinkLogItem(lg db.Log, linkPublicID string) gen.LinkLogItem {
 	clickedAt := ""
 	if lg.ClickedAt.Valid {
 		clickedAt = lg.ClickedAt.Time.Local().Format("2006-01-02 15:04:05")
 	}
 	return gen.LinkLogItem{
 		Id:             strconv.FormatInt(lg.ID, 10),
-		LinkId:         strconv.FormatInt(lg.LinkID, 10),
+		LinkId:         linkPublicID,
 		IpAddress:      lg.IpAddress,
 		UserAgent:      lg.UserAgent,
 		DeviceType:     lg.DeviceType,
@@ -396,7 +396,7 @@ func (h *Handler) ListLinkLogs(w http.ResponseWriter, r *http.Request, id string
 
 	items := make([]gen.LinkLogItem, 0, len(result.Items))
 	for _, lg := range result.Items {
-		items = append(items, toLinkLogItem(lg))
+		items = append(items, toLinkLogItem(lg, id))
 	}
 
 	writeJSON(w, http.StatusOK, gen.PaginatedLogsResponse{

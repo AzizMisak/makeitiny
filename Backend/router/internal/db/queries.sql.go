@@ -63,7 +63,7 @@ func (q *Queries) CreateLog(ctx context.Context, arg CreateLogParams) (Log, erro
 }
 
 const getLinkByAlias = `-- name: GetLinkByAlias :one
-SELECT id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+SELECT id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
 WHERE alias = $1
 LIMIT 1
 `

@@ -28,11 +28,21 @@ func NewUserRepository(q *db.Queries, rdb *redis.Client) *UserRepository {
 }
 
 func (r *UserRepository) Create(ctx context.Context, name, email, passwordHash string) (db.User, error) {
-	return r.q.CreateUser(ctx, db.CreateUserParams{
+	u, err := r.q.CreateUser(ctx, db.CreateUserParams{
 		Name:         name,
 		Email:        email,
 		PasswordHash: passwordHash,
 	})
+	if err != nil {
+		return db.User{}, err
+	}
+
+	_ = r.q.AssignRoleByName(ctx, db.AssignRoleByNameParams{
+		UserID:   u.ID,
+		RoleName: "user",
+	})
+
+	return u, nil
 }
 
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (db.User, error) {
@@ -158,10 +168,10 @@ func (r *LinkRepository) ListTopByUser(ctx context.Context, userID int64, limit 
 	})
 }
 
-func (r *LinkRepository) GetByIDAndUser(ctx context.Context, id, userID int64) (db.Link, error) {
+func (r *LinkRepository) GetByIDAndUser(ctx context.Context, publicID string, userID int64) (db.Link, error) {
 	return r.q.GetLinkByIDAndUser(ctx, db.GetLinkByIDAndUserParams{
-		ID:     id,
-		UserID: userID,
+		PublicID: publicID,
+		UserID:   userID,
 	})
 }
 
@@ -185,14 +195,14 @@ func (r *LinkRepository) Update(ctx context.Context, oldAlias string, params db.
 }
 
 // Delete önce PostgreSQL'den siler, hemen ardından Redis Hash kaydını siler.
-func (r *LinkRepository) Delete(ctx context.Context, id, userID int64) (int64, error) {
-	existing, err := r.GetByIDAndUser(ctx, id, userID)
+func (r *LinkRepository) Delete(ctx context.Context, publicID string, userID int64) (int64, error) {
+	existing, err := r.GetByIDAndUser(ctx, publicID, userID)
 	if err != nil {
 		return 0, err
 	}
 
 	rows, err := r.q.DeleteLink(ctx, db.DeleteLinkParams{
-		ID:     id,
+		ID:     existing.ID,
 		UserID: userID,
 	})
 	if err != nil {

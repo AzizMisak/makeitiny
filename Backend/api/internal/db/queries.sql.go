@@ -25,12 +25,13 @@ func (q *Queries) AliasExists(ctx context.Context, alias string) (bool, error) {
 }
 
 const createLink = `-- name: CreateLink :one
-INSERT INTO links (user_id, alias, target_url, password_hash, wait_enabled, wait_seconds)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds
+INSERT INTO links (public_id, user_id, alias, target_url, password_hash, wait_enabled, wait_seconds)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds
 `
 
 type CreateLinkParams struct {
+	PublicID     string      `json:"public_id"`
 	UserID       int64       `json:"user_id"`
 	Alias        string      `json:"alias"`
 	TargetUrl    string      `json:"target_url"`
@@ -41,6 +42,7 @@ type CreateLinkParams struct {
 
 func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, error) {
 	row := q.db.QueryRow(ctx, createLink,
+		arg.PublicID,
 		arg.UserID,
 		arg.Alias,
 		arg.TargetUrl,
@@ -51,6 +53,7 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 	var i Link
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
 		&i.UserID,
 		&i.Alias,
 		&i.TargetUrl,
@@ -88,6 +91,50 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
+const assignRoleByName = `-- name: AssignRoleByName :exec
+INSERT INTO users_roles (user_id, role_id)
+SELECT $1, id FROM roles WHERE name = $2
+ON CONFLICT (user_id, role_id) DO NOTHING
+`
+
+type AssignRoleByNameParams struct {
+	UserID   int64  `json:"user_id"`
+	RoleName string `json:"role_name"`
+}
+
+func (q *Queries) AssignRoleByName(ctx context.Context, arg AssignRoleByNameParams) error {
+	_, err := q.db.Exec(ctx, assignRoleByName, arg.UserID, arg.RoleName)
+	return err
+}
+
+const getUserRoles = `-- name: GetUserRoles :many
+SELECT r.name
+FROM roles r
+JOIN users_roles ur ON ur.role_id = r.id
+WHERE ur.user_id = $1
+ORDER BY r.id ASC
+`
+
+func (q *Queries) GetUserRoles(ctx context.Context, userID int64) ([]string, error) {
+	rows, err := q.db.Query(ctx, getUserRoles, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteLink = `-- name: DeleteLink :execrows
 DELETE FROM links
 WHERE id = $1 AND user_id = $2
@@ -120,7 +167,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id int64) (int64, error) {
 }
 
 const getLinkByAlias = `-- name: GetLinkByAlias :one
-SELECT id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+SELECT id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
 WHERE alias = $1
 LIMIT 1
 `
@@ -130,6 +177,7 @@ func (q *Queries) GetLinkByAlias(ctx context.Context, alias string) (Link, error
 	var i Link
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
 		&i.UserID,
 		&i.Alias,
 		&i.TargetUrl,
@@ -143,21 +191,22 @@ func (q *Queries) GetLinkByAlias(ctx context.Context, alias string) (Link, error
 }
 
 const getLinkByIDAndUser = `-- name: GetLinkByIDAndUser :one
-SELECT id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
-WHERE id = $1 AND user_id = $2
+SELECT id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+WHERE public_id = $1 AND user_id = $2
 LIMIT 1
 `
 
 type GetLinkByIDAndUserParams struct {
-	ID     int64 `json:"id"`
-	UserID int64 `json:"user_id"`
+	PublicID string `json:"public_id"`
+	UserID   int64  `json:"user_id"`
 }
 
 func (q *Queries) GetLinkByIDAndUser(ctx context.Context, arg GetLinkByIDAndUserParams) (Link, error) {
-	row := q.db.QueryRow(ctx, getLinkByIDAndUser, arg.ID, arg.UserID)
+	row := q.db.QueryRow(ctx, getLinkByIDAndUser, arg.PublicID, arg.UserID)
 	var i Link
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
 		&i.UserID,
 		&i.Alias,
 		&i.TargetUrl,
@@ -209,7 +258,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 }
 
 const listLinksByUser = `-- name: ListLinksByUser :many
-SELECT id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+SELECT id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
 WHERE user_id = $1
 ORDER BY created_at DESC
 `
@@ -225,6 +274,7 @@ func (q *Queries) ListLinksByUser(ctx context.Context, userID int64) ([]Link, er
 		var i Link
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.UserID,
 			&i.Alias,
 			&i.TargetUrl,
@@ -245,7 +295,7 @@ func (q *Queries) ListLinksByUser(ctx context.Context, userID int64) ([]Link, er
 }
 
 const listLinksByUserPaginated = `-- name: ListLinksByUserPaginated :many
-SELECT id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+SELECT id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
 WHERE user_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT $2 OFFSET $3
@@ -268,6 +318,7 @@ func (q *Queries) ListLinksByUserPaginated(ctx context.Context, arg ListLinksByU
 		var i Link
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.UserID,
 			&i.Alias,
 			&i.TargetUrl,
@@ -310,7 +361,7 @@ func (q *Queries) GetUserLinkStats(ctx context.Context, userID int64) (GetUserLi
 }
 
 const listTopLinksByUser = `-- name: ListTopLinksByUser :many
-SELECT id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+SELECT id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
 WHERE user_id = $1
 ORDER BY clicks DESC, created_at DESC, id DESC
 LIMIT $2
@@ -332,6 +383,7 @@ func (q *Queries) ListTopLinksByUser(ctx context.Context, arg ListTopLinksByUser
 		var i Link
 		if err := rows.Scan(
 			&i.ID,
+			&i.PublicID,
 			&i.UserID,
 			&i.Alias,
 			&i.TargetUrl,
@@ -452,7 +504,7 @@ SET alias = $3,
     wait_enabled = $6,
     wait_seconds = $7
 WHERE id = $1 AND user_id = $2
-RETURNING id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds
+RETURNING id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds
 `
 
 type UpdateLinkParams struct {
@@ -478,6 +530,7 @@ func (q *Queries) UpdateLink(ctx context.Context, arg UpdateLinkParams) (Link, e
 	var i Link
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
 		&i.UserID,
 		&i.Alias,
 		&i.TargetUrl,

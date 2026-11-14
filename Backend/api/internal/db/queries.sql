@@ -3,6 +3,18 @@ INSERT INTO users (name, email, password_hash)
 VALUES ($1, $2, $3)
 RETURNING *;
 
+-- name: AssignRoleByName :exec
+INSERT INTO users_roles (user_id, role_id)
+SELECT $1, id FROM roles WHERE name = $2
+ON CONFLICT (user_id, role_id) DO NOTHING;
+
+-- name: GetUserRoles :many
+SELECT r.name
+FROM roles r
+JOIN users_roles ur ON ur.role_id = r.id
+WHERE ur.user_id = $1
+ORDER BY r.id ASC;
+
 -- name: GetUserByEmail :one
 SELECT * FROM users
 WHERE email = $1
@@ -23,8 +35,8 @@ DELETE FROM users
 WHERE id = $1;
 
 -- name: CreateLink :one
-INSERT INTO links (user_id, alias, target_url, password_hash, wait_enabled, wait_seconds)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO links (public_id, user_id, alias, target_url, password_hash, wait_enabled, wait_seconds)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: ListLinksByUser :many
@@ -54,7 +66,7 @@ LIMIT $2;
 
 -- name: GetLinkByIDAndUser :one
 SELECT * FROM links
-WHERE id = $1 AND user_id = $2
+WHERE public_id = $1 AND user_id = $2
 LIMIT 1;
 
 -- name: GetLinkByAlias :one

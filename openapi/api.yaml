@@ -564,7 +564,7 @@ components:
       properties:
         id:
           type: string
-          example: "1"
+          example: "k9Xm2pQ7vR4nL8wZ"
         alias:
           type: string
           example: kampanya-yaz
@@ -609,7 +609,7 @@ components:
           example: "10"
         linkId:
           type: string
-          example: "1"
+          example: "k9Xm2pQ7vR4nL8wZ"
         ipAddress:
           type: string
           example: "127.0.0.1"

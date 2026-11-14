@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -35,9 +34,10 @@ var (
 )
 
 const (
-	base62Chars       = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	defaultAliasLen   = 6
-	maxAliasCollision = 5
+	base62Chars        = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	defaultAliasLen    = 6
+	defaultPublicIDLen = 16
+	maxAliasCollision  = 5
 )
 
 var aliasRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,32}$`)
@@ -292,7 +292,13 @@ func (s *LinkService) CreateLink(ctx context.Context, userID int64, target strin
 		finalWaitSeconds = *waitSeconds
 	}
 
+	publicID, err := generateBase62(defaultPublicIDLen)
+	if err != nil {
+		return db.Link{}, err
+	}
+
 	link, err := s.links.Create(ctx, db.CreateLinkParams{
+		PublicID:     publicID,
 		UserID:       userID,
 		Alias:        finalAlias,
 		TargetUrl:    cleanTarget,
@@ -405,11 +411,11 @@ func (s *LinkService) CheckAlias(ctx context.Context, alias string) (bool, error
 }
 
 func (s *LinkService) GetLink(ctx context.Context, idStr string, userID int64) (db.Link, error) {
-	id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
-	if err != nil {
+	publicID := strings.TrimSpace(idStr)
+	if publicID == "" {
 		return db.Link{}, ErrLinkNotFound
 	}
-	link, err := s.links.GetByIDAndUser(ctx, id, userID)
+	link, err := s.links.GetByIDAndUser(ctx, publicID, userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.Link{}, ErrLinkNotFound
@@ -420,12 +426,12 @@ func (s *LinkService) GetLink(ctx context.Context, idStr string, userID int64) (
 }
 
 func (s *LinkService) UpdateLink(ctx context.Context, idStr string, userID int64, target, alias, password *string, waitEnabled *bool, waitSeconds *int32) (db.Link, error) {
-	id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
-	if err != nil {
+	publicID := strings.TrimSpace(idStr)
+	if publicID == "" {
 		return db.Link{}, ErrLinkNotFound
 	}
 
-	existing, err := s.links.GetByIDAndUser(ctx, id, userID)
+	existing, err := s.links.GetByIDAndUser(ctx, publicID, userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.Link{}, ErrLinkNotFound
@@ -547,12 +553,12 @@ func (s *LinkService) ListLinkLogs(ctx context.Context, idStr string, userID int
 }
 
 func (s *LinkService) DeleteLink(ctx context.Context, idStr string, userID int64) error {
-	id, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
-	if err != nil {
+	publicID := strings.TrimSpace(idStr)
+	if publicID == "" {
 		return ErrLinkNotFound
 	}
 
-	rows, err := s.links.Delete(ctx, id, userID)
+	rows, err := s.links.Delete(ctx, publicID, userID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrLinkNotFound
