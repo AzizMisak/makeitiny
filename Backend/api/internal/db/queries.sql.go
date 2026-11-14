@@ -8,8 +8,92 @@ package db
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+func scanUser(row pgx.Row) (User, error) {
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.PasswordHash,
+		&i.CreatedAt,
+		&i.PlanID,
+		&i.PlanExpiresAt,
+		&i.IsActive,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+func scanPlan(row pgx.Row) (Plan, error) {
+	var i Plan
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.PriceMonthly,
+		&i.MaxLinks,
+		&i.AllowCustomAlias,
+		&i.AllowPassword,
+		&i.AllowQr,
+		&i.AllowAds,
+		&i.AnalyticsDays,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+func scanLink(row pgx.Row) (Link, error) {
+	var i Link
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.UserID,
+		&i.Alias,
+		&i.TargetUrl,
+		&i.PasswordHash,
+		&i.Clicks,
+		&i.CreatedAt,
+		&i.WaitEnabled,
+		&i.WaitSeconds,
+		&i.Title,
+		&i.IsActive,
+		&i.ExpiresAt,
+		&i.MaxClicks,
+		&i.AdEnabled,
+		&i.SecurityStatus,
+		&i.SecurityCheckedAt,
+		&i.QrCodePath,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+func scanLog(row pgx.Row) (Log, error) {
+	var i Log
+	err := row.Scan(
+		&i.ID,
+		&i.LinkID,
+		&i.IpAddress,
+		&i.UserAgent,
+		&i.DeviceType,
+		&i.Browser,
+		&i.Os,
+		&i.Referer,
+		&i.AcceptLanguage,
+		&i.ClickedAt,
+		&i.CountryCode,
+	)
+	return i, err
+}
+
+const linkSelectCols = `id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds, title, is_active, expires_at, max_clicks, ad_enabled, security_status, security_checked_at, qr_code_path, updated_at`
+const userSelectCols = `id, name, email, password_hash, created_at, plan_id, plan_expires_at, is_active, updated_at`
+const planSelectCols = `id, slug, name, price_monthly::FLOAT8 AS price_monthly, max_links, allow_custom_alias, allow_password, allow_qr, allow_ads, analytics_days, created_at`
+const logSelectCols = `id, link_id, ip_address, user_agent, device_type, browser, os, referer, accept_language, clicked_at, country_code`
 
 const aliasExists = `-- name: AliasExists :one
 SELECT EXISTS(
@@ -24,20 +108,49 @@ func (q *Queries) AliasExists(ctx context.Context, alias string) (bool, error) {
 	return exists, err
 }
 
-const createLink = `-- name: CreateLink :one
-INSERT INTO links (public_id, user_id, alias, target_url, password_hash, wait_enabled, wait_seconds)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds
+const countLinksByUser = `-- name: CountLinksByUser :one
+SELECT COUNT(*)::BIGINT FROM links
+WHERE user_id = $1
 `
 
+func (q *Queries) CountLinksByUser(ctx context.Context, userID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countLinksByUser, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createLink = `-- name: CreateLink :one
+INSERT INTO links (
+    public_id,
+    user_id,
+    alias,
+    target_url,
+    password_hash,
+    wait_enabled,
+    wait_seconds,
+    title,
+    is_active,
+    expires_at,
+    max_clicks,
+    ad_enabled
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+RETURNING ` + linkSelectCols
+
 type CreateLinkParams struct {
-	PublicID     string      `json:"public_id"`
-	UserID       int64       `json:"user_id"`
-	Alias        string      `json:"alias"`
-	TargetUrl    string      `json:"target_url"`
-	PasswordHash pgtype.Text `json:"password_hash"`
-	WaitEnabled  bool        `json:"wait_enabled"`
-	WaitSeconds  int32       `json:"wait_seconds"`
+	PublicID     string             `json:"public_id"`
+	UserID       int64              `json:"user_id"`
+	Alias        string             `json:"alias"`
+	TargetUrl    string             `json:"target_url"`
+	PasswordHash pgtype.Text        `json:"password_hash"`
+	WaitEnabled  bool               `json:"wait_enabled"`
+	WaitSeconds  int32              `json:"wait_seconds"`
+	Title        string             `json:"title"`
+	IsActive     bool               `json:"is_active"`
+	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+	MaxClicks    pgtype.Int8        `json:"max_clicks"`
+	AdEnabled    bool               `json:"ad_enabled"`
 }
 
 func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, error) {
@@ -49,28 +162,19 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		arg.PasswordHash,
 		arg.WaitEnabled,
 		arg.WaitSeconds,
+		arg.Title,
+		arg.IsActive,
+		arg.ExpiresAt,
+		arg.MaxClicks,
+		arg.AdEnabled,
 	)
-	var i Link
-	err := row.Scan(
-		&i.ID,
-		&i.PublicID,
-		&i.UserID,
-		&i.Alias,
-		&i.TargetUrl,
-		&i.PasswordHash,
-		&i.Clicks,
-		&i.CreatedAt,
-		&i.WaitEnabled,
-		&i.WaitSeconds,
-	)
-	return i, err
+	return scanLink(row)
 }
 
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (name, email, password_hash)
 VALUES ($1, $2, $3)
-RETURNING id, name, email, password_hash, created_at
-`
+RETURNING ` + userSelectCols
 
 type CreateUserParams struct {
 	Name         string `json:"name"`
@@ -80,15 +184,7 @@ type CreateUserParams struct {
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, createUser, arg.Name, arg.Email, arg.PasswordHash)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Email,
-		&i.PasswordHash,
-		&i.CreatedAt,
-	)
-	return i, err
+	return scanUser(row)
 }
 
 const assignRoleByName = `-- name: AssignRoleByName :exec
@@ -104,6 +200,16 @@ type AssignRoleByNameParams struct {
 
 func (q *Queries) AssignRoleByName(ctx context.Context, arg AssignRoleByNameParams) error {
 	_, err := q.db.Exec(ctx, assignRoleByName, arg.UserID, arg.RoleName)
+	return err
+}
+
+const clearUserNonOwnerRoles = `-- name: ClearUserNonOwnerRoles :exec
+DELETE FROM users_roles
+WHERE user_id = $1 AND role_id <> 3
+`
+
+func (q *Queries) ClearUserNonOwnerRoles(ctx context.Context, userID int64) error {
+	_, err := q.db.Exec(ctx, clearUserNonOwnerRoles, userID)
 	return err
 }
 
@@ -133,6 +239,96 @@ func (q *Queries) GetUserRoles(ctx context.Context, userID int64) ([]string, err
 		return nil, err
 	}
 	return items, nil
+}
+
+const getPlanByID = `-- name: GetPlanByID :one
+SELECT ` + planSelectCols + `
+FROM plans
+WHERE id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetPlanByID(ctx context.Context, id int32) (Plan, error) {
+	row := q.db.QueryRow(ctx, getPlanByID, id)
+	return scanPlan(row)
+}
+
+const getPlanBySlug = `-- name: GetPlanBySlug :one
+SELECT ` + planSelectCols + `
+FROM plans
+WHERE slug = $1
+LIMIT 1
+`
+
+func (q *Queries) GetPlanBySlug(ctx context.Context, slug string) (Plan, error) {
+	row := q.db.QueryRow(ctx, getPlanBySlug, slug)
+	return scanPlan(row)
+}
+
+const listPlans = `-- name: ListPlans :many
+SELECT ` + planSelectCols + `
+FROM plans
+ORDER BY id ASC
+`
+
+func (q *Queries) ListPlans(ctx context.Context) ([]Plan, error) {
+	rows, err := q.db.Query(ctx, listPlans)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Plan
+	for rows.Next() {
+		p, err := scanPlan(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updatePlan = `-- name: UpdatePlan :one
+UPDATE plans
+SET name = $2,
+    price_monthly = $3,
+    max_links = $4,
+    allow_custom_alias = $5,
+    allow_password = $6,
+    allow_qr = $7,
+    allow_ads = $8,
+    analytics_days = $9
+WHERE id = $1
+RETURNING ` + planSelectCols
+
+type UpdatePlanParams struct {
+	ID               int32   `json:"id"`
+	Name             string  `json:"name"`
+	PriceMonthly     float64 `json:"price_monthly"`
+	MaxLinks         int32   `json:"max_links"`
+	AllowCustomAlias bool    `json:"allow_custom_alias"`
+	AllowPassword    bool    `json:"allow_password"`
+	AllowQr          bool    `json:"allow_qr"`
+	AllowAds         bool    `json:"allow_ads"`
+	AnalyticsDays    int32   `json:"analytics_days"`
+}
+
+func (q *Queries) UpdatePlan(ctx context.Context, arg UpdatePlanParams) (Plan, error) {
+	row := q.db.QueryRow(ctx, updatePlan,
+		arg.ID,
+		arg.Name,
+		arg.PriceMonthly,
+		arg.MaxLinks,
+		arg.AllowCustomAlias,
+		arg.AllowPassword,
+		arg.AllowQr,
+		arg.AllowAds,
+		arg.AnalyticsDays,
+	)
+	return scanPlan(row)
 }
 
 const deleteLink = `-- name: DeleteLink :execrows
@@ -167,31 +363,18 @@ func (q *Queries) DeleteUser(ctx context.Context, id int64) (int64, error) {
 }
 
 const getLinkByAlias = `-- name: GetLinkByAlias :one
-SELECT id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+SELECT ` + linkSelectCols + ` FROM links
 WHERE alias = $1
 LIMIT 1
 `
 
 func (q *Queries) GetLinkByAlias(ctx context.Context, alias string) (Link, error) {
 	row := q.db.QueryRow(ctx, getLinkByAlias, alias)
-	var i Link
-	err := row.Scan(
-		&i.ID,
-		&i.PublicID,
-		&i.UserID,
-		&i.Alias,
-		&i.TargetUrl,
-		&i.PasswordHash,
-		&i.Clicks,
-		&i.CreatedAt,
-		&i.WaitEnabled,
-		&i.WaitSeconds,
-	)
-	return i, err
+	return scanLink(row)
 }
 
 const getLinkByIDAndUser = `-- name: GetLinkByIDAndUser :one
-SELECT id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+SELECT ` + linkSelectCols + ` FROM links
 WHERE public_id = $1 AND user_id = $2
 LIMIT 1
 `
@@ -203,62 +386,44 @@ type GetLinkByIDAndUserParams struct {
 
 func (q *Queries) GetLinkByIDAndUser(ctx context.Context, arg GetLinkByIDAndUserParams) (Link, error) {
 	row := q.db.QueryRow(ctx, getLinkByIDAndUser, arg.PublicID, arg.UserID)
-	var i Link
-	err := row.Scan(
-		&i.ID,
-		&i.PublicID,
-		&i.UserID,
-		&i.Alias,
-		&i.TargetUrl,
-		&i.PasswordHash,
-		&i.Clicks,
-		&i.CreatedAt,
-		&i.WaitEnabled,
-		&i.WaitSeconds,
-	)
-	return i, err
+	return scanLink(row)
+}
+
+const getLinkByPublicID = `-- name: GetLinkByPublicID :one
+SELECT ` + linkSelectCols + ` FROM links
+WHERE public_id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetLinkByPublicID(ctx context.Context, publicID string) (Link, error) {
+	row := q.db.QueryRow(ctx, getLinkByPublicID, publicID)
+	return scanLink(row)
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, name, email, password_hash, created_at FROM users
+SELECT ` + userSelectCols + ` FROM users
 WHERE email = $1
 LIMIT 1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Email,
-		&i.PasswordHash,
-		&i.CreatedAt,
-	)
-	return i, err
+	return scanUser(row)
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, name, email, password_hash, created_at FROM users
+SELECT ` + userSelectCols + ` FROM users
 WHERE id = $1
 LIMIT 1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByID, id)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Email,
-		&i.PasswordHash,
-		&i.CreatedAt,
-	)
-	return i, err
+	return scanUser(row)
 }
 
 const listLinksByUser = `-- name: ListLinksByUser :many
-SELECT id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+SELECT ` + linkSelectCols + ` FROM links
 WHERE user_id = $1
 ORDER BY created_at DESC
 `
@@ -271,22 +436,11 @@ func (q *Queries) ListLinksByUser(ctx context.Context, userID int64) ([]Link, er
 	defer rows.Close()
 	var items []Link
 	for rows.Next() {
-		var i Link
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.UserID,
-			&i.Alias,
-			&i.TargetUrl,
-			&i.PasswordHash,
-			&i.Clicks,
-			&i.CreatedAt,
-			&i.WaitEnabled,
-			&i.WaitSeconds,
-		); err != nil {
+		l, err := scanLink(rows)
+		if err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, l)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -295,7 +449,7 @@ func (q *Queries) ListLinksByUser(ctx context.Context, userID int64) ([]Link, er
 }
 
 const listLinksByUserPaginated = `-- name: ListLinksByUserPaginated :many
-SELECT id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+SELECT ` + linkSelectCols + ` FROM links
 WHERE user_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT $2 OFFSET $3
@@ -315,22 +469,11 @@ func (q *Queries) ListLinksByUserPaginated(ctx context.Context, arg ListLinksByU
 	defer rows.Close()
 	var items []Link
 	for rows.Next() {
-		var i Link
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.UserID,
-			&i.Alias,
-			&i.TargetUrl,
-			&i.PasswordHash,
-			&i.Clicks,
-			&i.CreatedAt,
-			&i.WaitEnabled,
-			&i.WaitSeconds,
-		); err != nil {
+		l, err := scanLink(rows)
+		if err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, l)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -361,7 +504,7 @@ func (q *Queries) GetUserLinkStats(ctx context.Context, userID int64) (GetUserLi
 }
 
 const listTopLinksByUser = `-- name: ListTopLinksByUser :many
-SELECT id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+SELECT ` + linkSelectCols + ` FROM links
 WHERE user_id = $1
 ORDER BY clicks DESC, created_at DESC, id DESC
 LIMIT $2
@@ -380,22 +523,11 @@ func (q *Queries) ListTopLinksByUser(ctx context.Context, arg ListTopLinksByUser
 	defer rows.Close()
 	var items []Link
 	for rows.Next() {
-		var i Link
-		if err := rows.Scan(
-			&i.ID,
-			&i.PublicID,
-			&i.UserID,
-			&i.Alias,
-			&i.TargetUrl,
-			&i.PasswordHash,
-			&i.Clicks,
-			&i.CreatedAt,
-			&i.WaitEnabled,
-			&i.WaitSeconds,
-		); err != nil {
+		l, err := scanLink(rows)
+		if err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, l)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -404,7 +536,7 @@ func (q *Queries) ListTopLinksByUser(ctx context.Context, arg ListTopLinksByUser
 }
 
 const listLogsByLink = `-- name: ListLogsByLink :many
-SELECT id, link_id, ip_address, user_agent, device_type, browser, os, referer, accept_language, clicked_at FROM logs
+SELECT ` + logSelectCols + ` FROM logs
 WHERE link_id = $1
 ORDER BY clicked_at DESC
 `
@@ -417,22 +549,11 @@ func (q *Queries) ListLogsByLink(ctx context.Context, linkID int64) ([]Log, erro
 	defer rows.Close()
 	var items []Log
 	for rows.Next() {
-		var i Log
-		if err := rows.Scan(
-			&i.ID,
-			&i.LinkID,
-			&i.IpAddress,
-			&i.UserAgent,
-			&i.DeviceType,
-			&i.Browser,
-			&i.Os,
-			&i.Referer,
-			&i.AcceptLanguage,
-			&i.ClickedAt,
-		); err != nil {
+		lg, err := scanLog(rows)
+		if err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, lg)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -442,53 +563,48 @@ func (q *Queries) ListLogsByLink(ctx context.Context, linkID int64) ([]Log, erro
 
 const countLogsByLink = `-- name: CountLogsByLink :one
 SELECT COUNT(*)::BIGINT FROM logs
-WHERE link_id = $1
+WHERE link_id = $1 AND clicked_at >= $2
 `
 
-func (q *Queries) CountLogsByLink(ctx context.Context, linkID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countLogsByLink, linkID)
+type CountLogsByLinkParams struct {
+	LinkID    int64              `json:"link_id"`
+	ClickedAt pgtype.Timestamptz `json:"clicked_at"`
+}
+
+func (q *Queries) CountLogsByLink(ctx context.Context, arg CountLogsByLinkParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countLogsByLink, arg.LinkID, arg.ClickedAt)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const listLogsByLinkPaginated = `-- name: ListLogsByLinkPaginated :many
-SELECT id, link_id, ip_address, user_agent, device_type, browser, os, referer, accept_language, clicked_at FROM logs
-WHERE link_id = $1
+SELECT ` + logSelectCols + ` FROM logs
+WHERE link_id = $1 AND clicked_at >= $2
 ORDER BY clicked_at DESC, id DESC
-LIMIT $2 OFFSET $3
+LIMIT $3 OFFSET $4
 `
 
 type ListLogsByLinkPaginatedParams struct {
-	LinkID int64 `json:"link_id"`
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	LinkID    int64              `json:"link_id"`
+	ClickedAt pgtype.Timestamptz `json:"clicked_at"`
+	Limit     int32              `json:"limit"`
+	Offset    int32              `json:"offset"`
 }
 
 func (q *Queries) ListLogsByLinkPaginated(ctx context.Context, arg ListLogsByLinkPaginatedParams) ([]Log, error) {
-	rows, err := q.db.Query(ctx, listLogsByLinkPaginated, arg.LinkID, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listLogsByLinkPaginated, arg.LinkID, arg.ClickedAt, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var items []Log
 	for rows.Next() {
-		var i Log
-		if err := rows.Scan(
-			&i.ID,
-			&i.LinkID,
-			&i.IpAddress,
-			&i.UserAgent,
-			&i.DeviceType,
-			&i.Browser,
-			&i.Os,
-			&i.Referer,
-			&i.AcceptLanguage,
-			&i.ClickedAt,
-		); err != nil {
+		lg, err := scanLog(rows)
+		if err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, lg)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -502,19 +618,29 @@ SET alias = $3,
     target_url = $4,
     password_hash = $5,
     wait_enabled = $6,
-    wait_seconds = $7
+    wait_seconds = $7,
+    title = $8,
+    is_active = $9,
+    expires_at = $10,
+    max_clicks = $11,
+    ad_enabled = $12,
+    updated_at = NOW()
 WHERE id = $1 AND user_id = $2
-RETURNING id, public_id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds
-`
+RETURNING ` + linkSelectCols
 
 type UpdateLinkParams struct {
-	ID           int64       `json:"id"`
-	UserID       int64       `json:"user_id"`
-	Alias        string      `json:"alias"`
-	TargetUrl    string      `json:"target_url"`
-	PasswordHash pgtype.Text `json:"password_hash"`
-	WaitEnabled  bool        `json:"wait_enabled"`
-	WaitSeconds  int32       `json:"wait_seconds"`
+	ID           int64              `json:"id"`
+	UserID       int64              `json:"user_id"`
+	Alias        string             `json:"alias"`
+	TargetUrl    string             `json:"target_url"`
+	PasswordHash pgtype.Text        `json:"password_hash"`
+	WaitEnabled  bool               `json:"wait_enabled"`
+	WaitSeconds  int32              `json:"wait_seconds"`
+	Title        string             `json:"title"`
+	IsActive     bool               `json:"is_active"`
+	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+	MaxClicks    pgtype.Int8        `json:"max_clicks"`
+	AdEnabled    bool               `json:"ad_enabled"`
 }
 
 func (q *Queries) UpdateLink(ctx context.Context, arg UpdateLinkParams) (Link, error) {
@@ -526,26 +652,19 @@ func (q *Queries) UpdateLink(ctx context.Context, arg UpdateLinkParams) (Link, e
 		arg.PasswordHash,
 		arg.WaitEnabled,
 		arg.WaitSeconds,
+		arg.Title,
+		arg.IsActive,
+		arg.ExpiresAt,
+		arg.MaxClicks,
+		arg.AdEnabled,
 	)
-	var i Link
-	err := row.Scan(
-		&i.ID,
-		&i.PublicID,
-		&i.UserID,
-		&i.Alias,
-		&i.TargetUrl,
-		&i.PasswordHash,
-		&i.Clicks,
-		&i.CreatedAt,
-		&i.WaitEnabled,
-		&i.WaitSeconds,
-	)
-	return i, err
+	return scanLink(row)
 }
 
 const updateUserPassword = `-- name: UpdateUserPassword :execrows
 UPDATE users
-SET password_hash = $2
+SET password_hash = $2,
+    updated_at = NOW()
 WHERE email = $1
 `
 
@@ -556,6 +675,292 @@ type UpdateUserPasswordParams struct {
 
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateUserPassword, arg.Email, arg.PasswordHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+// --- Admin Queries ---
+
+const getPlatformStats = `-- name: GetPlatformStats :one
+SELECT
+    (SELECT COUNT(*)::BIGINT FROM users) AS total_users,
+    (SELECT COUNT(*) FILTER (WHERE is_active = TRUE)::BIGINT FROM users) AS active_users,
+    COUNT(*)::BIGINT AS total_links,
+    COUNT(*) FILTER (WHERE is_active = TRUE)::BIGINT AS active_links,
+    COUNT(*) FILTER (WHERE security_status = 'blocked' OR security_status = 'malicious')::BIGINT AS blocked_links,
+    COALESCE(SUM(clicks), 0)::BIGINT AS total_clicks
+FROM links
+`
+
+type GetPlatformStatsRow struct {
+	TotalUsers   int64 `json:"total_users"`
+	ActiveUsers  int64 `json:"active_users"`
+	TotalLinks   int64 `json:"total_links"`
+	ActiveLinks  int64 `json:"active_links"`
+	BlockedLinks int64 `json:"blocked_links"`
+	TotalClicks  int64 `json:"total_clicks"`
+}
+
+func (q *Queries) GetPlatformStats(ctx context.Context) (GetPlatformStatsRow, error) {
+	row := q.db.QueryRow(ctx, getPlatformStats)
+	var i GetPlatformStatsRow
+	err := row.Scan(
+		&i.TotalUsers,
+		&i.ActiveUsers,
+		&i.TotalLinks,
+		&i.ActiveLinks,
+		&i.BlockedLinks,
+		&i.TotalClicks,
+	)
+	return i, err
+}
+
+const countAdminUsers = `-- name: CountAdminUsers :one
+SELECT COUNT(*)::BIGINT
+FROM users
+WHERE ($1::text = '' OR email ILIKE '%' || $1 || '%' OR name ILIKE '%' || $1 || '%')
+`
+
+func (q *Queries) CountAdminUsers(ctx context.Context, search string) (int64, error) {
+	row := q.db.QueryRow(ctx, countAdminUsers, search)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const listAdminUsersPaginated = `-- name: ListAdminUsersPaginated :many
+SELECT ` + userSelectCols + `
+FROM users
+WHERE ($1::text = '' OR email ILIKE '%' || $1 || '%' OR name ILIKE '%' || $1 || '%')
+ORDER BY created_at DESC, id DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListAdminUsersPaginatedParams struct {
+	Search string `json:"search"`
+	Limit  int32  `json:"limit"`
+	Offset int32  `json:"offset"`
+}
+
+func (q *Queries) ListAdminUsersPaginated(ctx context.Context, arg ListAdminUsersPaginatedParams) ([]User, error) {
+	rows, err := q.db.Query(ctx, listAdminUsersPaginated, arg.Search, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const adminUpdateUser = `-- name: AdminUpdateUser :one
+UPDATE users
+SET plan_id = $2,
+    plan_expires_at = $3,
+    is_active = $4,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING ` + userSelectCols
+
+type AdminUpdateUserParams struct {
+	ID            int64              `json:"id"`
+	PlanID        int32              `json:"plan_id"`
+	PlanExpiresAt pgtype.Timestamptz `json:"plan_expires_at"`
+	IsActive      bool               `json:"is_active"`
+}
+
+func (q *Queries) AdminUpdateUser(ctx context.Context, arg AdminUpdateUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, adminUpdateUser, arg.ID, arg.PlanID, arg.PlanExpiresAt, arg.IsActive)
+	return scanUser(row)
+}
+
+const countAdminLinks = `-- name: CountAdminLinks :one
+SELECT COUNT(*)::BIGINT
+FROM links l
+LEFT JOIN users u ON u.id = l.user_id
+WHERE ($1::text = '' OR l.alias ILIKE '%' || $1 || '%' OR l.target_url ILIKE '%' || $1 || '%' OR l.title ILIKE '%' || $1 || '%' OR COALESCE(u.email, '') ILIKE '%' || $1 || '%')
+  AND (
+    $2::text = '' OR $2::text = 'all'
+    OR ($2::text = 'active' AND l.is_active = TRUE AND l.security_status <> 'blocked' AND l.security_status <> 'malicious')
+    OR ($2::text = 'inactive' AND l.is_active = FALSE)
+    OR ($2::text = 'blocked' AND (l.security_status = 'blocked' OR l.security_status = 'malicious'))
+  )
+`
+
+type CountAdminLinksParams struct {
+	Search string `json:"search"`
+	Status string `json:"status"`
+}
+
+func (q *Queries) CountAdminLinks(ctx context.Context, arg CountAdminLinksParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAdminLinks, arg.Search, arg.Status)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const listAdminLinksPaginated = `-- name: ListAdminLinksPaginated :many
+SELECT
+    l.id,
+    l.public_id,
+    COALESCE(l.user_id, 0)::BIGINT AS user_id,
+    l.alias,
+    l.target_url,
+    l.password_hash,
+    l.clicks,
+    l.created_at,
+    l.wait_enabled,
+    l.wait_seconds,
+    l.title,
+    l.is_active,
+    l.expires_at,
+    l.max_clicks,
+    l.ad_enabled,
+    l.security_status,
+    l.security_checked_at,
+    l.qr_code_path,
+    l.updated_at,
+    COALESCE(u.email, '') AS user_email,
+    COALESCE(u.name, '') AS user_name
+FROM links l
+LEFT JOIN users u ON u.id = l.user_id
+WHERE ($1::text = '' OR l.alias ILIKE '%' || $1 || '%' OR l.target_url ILIKE '%' || $1 || '%' OR l.title ILIKE '%' || $1 || '%' OR COALESCE(u.email, '') ILIKE '%' || $1 || '%')
+  AND (
+    $2::text = '' OR $2::text = 'all'
+    OR ($2::text = 'active' AND l.is_active = TRUE AND l.security_status <> 'blocked' AND l.security_status <> 'malicious')
+    OR ($2::text = 'inactive' AND l.is_active = FALSE)
+    OR ($2::text = 'blocked' AND (l.security_status = 'blocked' OR l.security_status = 'malicious'))
+  )
+ORDER BY l.created_at DESC, l.id DESC
+LIMIT $3 OFFSET $4
+`
+
+type ListAdminLinksPaginatedParams struct {
+	Search string `json:"search"`
+	Status string `json:"status"`
+	Limit  int32  `json:"limit"`
+	Offset int32  `json:"offset"`
+}
+
+type AdminLinkRow struct {
+	Link
+	UserEmail string `json:"user_email"`
+	UserName  string `json:"user_name"`
+}
+
+func (q *Queries) ListAdminLinksPaginated(ctx context.Context, arg ListAdminLinksPaginatedParams) ([]AdminLinkRow, error) {
+	rows, err := q.db.Query(ctx, listAdminLinksPaginated, arg.Search, arg.Status, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AdminLinkRow
+	for rows.Next() {
+		var i AdminLinkRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.UserID,
+			&i.Alias,
+			&i.TargetUrl,
+			&i.PasswordHash,
+			&i.Clicks,
+			&i.CreatedAt,
+			&i.WaitEnabled,
+			&i.WaitSeconds,
+			&i.Title,
+			&i.IsActive,
+			&i.ExpiresAt,
+			&i.MaxClicks,
+			&i.AdEnabled,
+			&i.SecurityStatus,
+			&i.SecurityCheckedAt,
+			&i.QrCodePath,
+			&i.UpdatedAt,
+			&i.UserEmail,
+			&i.UserName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const adminUpdateLink = `-- name: AdminUpdateLink :one
+UPDATE links
+SET alias = $2,
+    target_url = $3,
+    password_hash = $4,
+    wait_enabled = $5,
+    wait_seconds = $6,
+    title = $7,
+    is_active = $8,
+    expires_at = $9,
+    max_clicks = $10,
+    ad_enabled = $11,
+    security_status = $12,
+    security_checked_at = $13,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING ` + linkSelectCols
+
+type AdminUpdateLinkParams struct {
+	ID                int64              `json:"id"`
+	Alias             string             `json:"alias"`
+	TargetUrl         string             `json:"target_url"`
+	PasswordHash      pgtype.Text        `json:"password_hash"`
+	WaitEnabled       bool               `json:"wait_enabled"`
+	WaitSeconds       int32              `json:"wait_seconds"`
+	Title             string             `json:"title"`
+	IsActive          bool               `json:"is_active"`
+	ExpiresAt         pgtype.Timestamptz `json:"expires_at"`
+	MaxClicks         pgtype.Int8        `json:"max_clicks"`
+	AdEnabled         bool               `json:"ad_enabled"`
+	SecurityStatus    string             `json:"security_status"`
+	SecurityCheckedAt pgtype.Timestamptz `json:"security_checked_at"`
+}
+
+func (q *Queries) AdminUpdateLink(ctx context.Context, arg AdminUpdateLinkParams) (Link, error) {
+	row := q.db.QueryRow(ctx, adminUpdateLink,
+		arg.ID,
+		arg.Alias,
+		arg.TargetUrl,
+		arg.PasswordHash,
+		arg.WaitEnabled,
+		arg.WaitSeconds,
+		arg.Title,
+		arg.IsActive,
+		arg.ExpiresAt,
+		arg.MaxClicks,
+		arg.AdEnabled,
+		arg.SecurityStatus,
+		arg.SecurityCheckedAt,
+	)
+	return scanLink(row)
+}
+
+const adminDeleteLink = `-- name: AdminDeleteLink :execrows
+DELETE FROM links
+WHERE id = $1
+`
+
+func (q *Queries) AdminDeleteLink(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, adminDeleteLink, id)
 	if err != nil {
 		return 0, err
 	}

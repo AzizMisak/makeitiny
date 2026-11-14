@@ -25,7 +25,7 @@ type Plan struct {
 	ID               int32              `json:"id"`
 	Slug             string             `json:"slug"`
 	Name             string             `json:"name"`
-	PriceMonthly     pgtype.Numeric     `json:"price_monthly"`
+	PriceMonthly     float64            `json:"price_monthly"`
 	MaxLinks         int32              `json:"max_links"`
 	AllowCustomAlias bool               `json:"allow_custom_alias"`
 	AllowPassword    bool               `json:"allow_password"`

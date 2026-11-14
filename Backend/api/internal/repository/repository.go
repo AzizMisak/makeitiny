@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
 	"makeitiny/api/internal/db"
@@ -17,7 +18,7 @@ func linkCacheKey(alias string) string {
 	return "link:" + alias
 }
 
-// UserRepository kullanıcı verisine erişim katmanı.
+// UserRepository kullanıcı, rol ve paket verisine erişim katmanı.
 type UserRepository struct {
 	q     *db.Queries
 	redis *redis.Client
@@ -53,11 +54,65 @@ func (r *UserRepository) GetByID(ctx context.Context, id int64) (db.User, error)
 	return r.q.GetUserByID(ctx, id)
 }
 
+func (r *UserRepository) GetRoles(ctx context.Context, userID int64) ([]string, error) {
+	roles, err := r.q.GetUserRoles(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(roles) == 0 {
+		return []string{"user"}, nil
+	}
+	return roles, nil
+}
+
+func (r *UserRepository) SetRole(ctx context.Context, userID int64, roleName string) error {
+	if err := r.q.ClearUserNonOwnerRoles(ctx, userID); err != nil {
+		return err
+	}
+	return r.q.AssignRoleByName(ctx, db.AssignRoleByNameParams{
+		UserID:   userID,
+		RoleName: roleName,
+	})
+}
+
+func (r *UserRepository) GetPlanByID(ctx context.Context, planID int32) (db.Plan, error) {
+	return r.q.GetPlanByID(ctx, planID)
+}
+
+func (r *UserRepository) ListPlans(ctx context.Context) ([]db.Plan, error) {
+	return r.q.ListPlans(ctx)
+}
+
+func (r *UserRepository) UpdatePlan(ctx context.Context, params db.UpdatePlanParams) (db.Plan, error) {
+	return r.q.UpdatePlan(ctx, params)
+}
+
+func (r *UserRepository) CountLinks(ctx context.Context, userID int64) (int64, error) {
+	return r.q.CountLinksByUser(ctx, userID)
+}
+
 func (r *UserRepository) UpdatePassword(ctx context.Context, email, passwordHash string) (int64, error) {
 	return r.q.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{
 		Email:        email,
 		PasswordHash: passwordHash,
 	})
+}
+
+func (r *UserRepository) invalidateUserLinksCache(ctx context.Context, userID int64) {
+	if r.redis == nil {
+		return
+	}
+	links, err := r.q.ListLinksByUser(ctx, userID)
+	if err != nil || len(links) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(links))
+	for _, l := range links {
+		keys = append(keys, linkCacheKey(l.Alias))
+	}
+	if err := r.redis.Del(ctx, keys...).Err(); err != nil {
+		log.Printf("redis kullanıcı linkleri önbellek temizleme uyarısı: %v", err)
+	}
 }
 
 // Delete önce kullanıcının linklerini tespit eder, PostgreSQL'den kullanıcıyı (CASCADE ile linklerini) siler,
@@ -83,6 +138,27 @@ func (r *UserRepository) Delete(ctx context.Context, id int64) (int64, error) {
 	return rows, nil
 }
 
+func (r *UserRepository) CountAdminUsers(ctx context.Context, search string) (int64, error) {
+	return r.q.CountAdminUsers(ctx, search)
+}
+
+func (r *UserRepository) ListAdminUsersPaginated(ctx context.Context, search string, limit, offset int32) ([]db.User, error) {
+	return r.q.ListAdminUsersPaginated(ctx, db.ListAdminUsersPaginatedParams{
+		Search: search,
+		Limit:  limit,
+		Offset: offset,
+	})
+}
+
+func (r *UserRepository) AdminUpdateUser(ctx context.Context, params db.AdminUpdateUserParams) (db.User, error) {
+	u, err := r.q.AdminUpdateUser(ctx, params)
+	if err != nil {
+		return db.User{}, err
+	}
+	r.invalidateUserLinksCache(ctx, u.ID)
+	return u, nil
+}
+
 // LinkRepository link verisine erişim katmanı (PostgreSQL + Redis Hash).
 type LinkRepository struct {
 	q     *db.Queries
@@ -105,15 +181,31 @@ func (r *LinkRepository) syncToRedis(ctx context.Context, link db.Link) {
 		pwHash = link.PasswordHash.String
 	}
 
+	var expiresAtUnix int64
+	if link.ExpiresAt.Valid {
+		expiresAtUnix = link.ExpiresAt.Time.Unix()
+	}
+
+	var maxClicks int64
+	if link.MaxClicks.Valid {
+		maxClicks = link.MaxClicks.Int64
+	}
+
 	err := r.redis.HSet(ctx, key, map[string]any{
-		"id":            strconv.FormatInt(link.ID, 10),
-		"user_id":       strconv.FormatInt(link.UserID, 10),
-		"alias":         link.Alias,
-		"target_url":    link.TargetUrl,
-		"password_hash": pwHash,
-		"clicks":        strconv.FormatInt(link.Clicks, 10),
-		"wait_enabled":  strconv.FormatBool(link.WaitEnabled),
-		"wait_seconds":  strconv.FormatInt(int64(link.WaitSeconds), 10),
+		"id":              strconv.FormatInt(link.ID, 10),
+		"public_id":       link.PublicID,
+		"user_id":         strconv.FormatInt(link.UserID, 10),
+		"alias":           link.Alias,
+		"target_url":      link.TargetUrl,
+		"password_hash":   pwHash,
+		"clicks":          strconv.FormatInt(link.Clicks, 10),
+		"wait_enabled":    strconv.FormatBool(link.WaitEnabled),
+		"wait_seconds":    strconv.FormatInt(int64(link.WaitSeconds), 10),
+		"is_active":       strconv.FormatBool(link.IsActive),
+		"expires_at":      strconv.FormatInt(expiresAtUnix, 10),
+		"max_clicks":      strconv.FormatInt(maxClicks, 10),
+		"ad_enabled":      strconv.FormatBool(link.AdEnabled),
+		"security_status": link.SecurityStatus,
 	}).Err()
 	if err != nil {
 		log.Printf("redis HSET uyarısı (%s): %v", key, err)
@@ -175,6 +267,10 @@ func (r *LinkRepository) GetByIDAndUser(ctx context.Context, publicID string, us
 	})
 }
 
+func (r *LinkRepository) GetByPublicID(ctx context.Context, publicID string) (db.Link, error) {
+	return r.q.GetLinkByPublicID(ctx, publicID)
+}
+
 func (r *LinkRepository) AliasExists(ctx context.Context, alias string) (bool, error) {
 	return r.q.AliasExists(ctx, alias)
 }
@@ -220,14 +316,72 @@ func (r *LinkRepository) ListLogsByLink(ctx context.Context, linkID int64) ([]db
 	return r.q.ListLogsByLink(ctx, linkID)
 }
 
-func (r *LinkRepository) CountLogsByLink(ctx context.Context, linkID int64) (int64, error) {
-	return r.q.CountLogsByLink(ctx, linkID)
+func (r *LinkRepository) CountLogsByLink(ctx context.Context, linkID int64, since pgtype.Timestamptz) (int64, error) {
+	return r.q.CountLogsByLink(ctx, db.CountLogsByLinkParams{
+		LinkID:    linkID,
+		ClickedAt: since,
+	})
 }
 
-func (r *LinkRepository) ListLogsByLinkPaginated(ctx context.Context, linkID int64, limit, offset int32) ([]db.Log, error) {
+func (r *LinkRepository) ListLogsByLinkPaginated(ctx context.Context, linkID int64, since pgtype.Timestamptz, limit, offset int32) ([]db.Log, error) {
 	return r.q.ListLogsByLinkPaginated(ctx, db.ListLogsByLinkPaginatedParams{
-		LinkID: linkID,
+		LinkID:    linkID,
+		ClickedAt: since,
+		Limit:     limit,
+		Offset:    offset,
+	})
+}
+
+// --- Admin Operations ---
+
+func (r *LinkRepository) GetPlatformStats(ctx context.Context) (db.GetPlatformStatsRow, error) {
+	return r.q.GetPlatformStats(ctx)
+}
+
+func (r *LinkRepository) CountAdminLinks(ctx context.Context, search, status string) (int64, error) {
+	return r.q.CountAdminLinks(ctx, db.CountAdminLinksParams{
+		Search: search,
+		Status: status,
+	})
+}
+
+func (r *LinkRepository) ListAdminLinksPaginated(ctx context.Context, search, status string, limit, offset int32) ([]db.AdminLinkRow, error) {
+	return r.q.ListAdminLinksPaginated(ctx, db.ListAdminLinksPaginatedParams{
+		Search: search,
+		Status: status,
 		Limit:  limit,
 		Offset: offset,
 	})
+}
+
+func (r *LinkRepository) AdminUpdate(ctx context.Context, oldAlias string, params db.AdminUpdateLinkParams) (db.Link, error) {
+	updated, err := r.q.AdminUpdateLink(ctx, params)
+	if err != nil {
+		return db.Link{}, err
+	}
+
+	if oldAlias != "" && oldAlias != updated.Alias {
+		r.removeFromRedis(ctx, oldAlias)
+	}
+	r.syncToRedis(ctx, updated)
+
+	return updated, nil
+}
+
+func (r *LinkRepository) AdminDelete(ctx context.Context, publicID string) (int64, error) {
+	existing, err := r.GetByPublicID(ctx, publicID)
+	if err != nil {
+		return 0, err
+	}
+
+	rows, err := r.q.AdminDeleteLink(ctx, existing.ID)
+	if err != nil {
+		return 0, err
+	}
+
+	if rows > 0 {
+		r.removeFromRedis(ctx, existing.Alias)
+	}
+
+	return rows, nil
 }

@@ -19,6 +19,7 @@ Bu doküman, MakeItTiny projesinin geliştirilme sürecinde alınan temel mimari
 8. [ADR-008: Bağımsız Konteynerizasyon ve Swagger Dokümantasyonu](#adr-008-bağımsız-konteynerizasyon-ve-swagger-dokümantasyonu)
 9. [ADR-009: Path Bazlı Nginx Yönlendirmesi ve Geliştirme/Prod Port Stratejisi](#adr-009-path-bazlı-nginx-yönlendirmesi-ve-geliştirmeprod-port-stratejisi)
 10. [ADR-010: Kimlik Doğrulama, Şifreleme, Link Üretimi ve Redis Hash Mimarisi](#adr-010-kimlik-doğrulama-şifreleme-link-üretimi-ve-redis-hash-mimarisi)
+11. [ADR-011: RBAC, Üyelik Paketleri ve Yönetici Arayüzü (Tekil Frontend vs İzole Subdomain Notu)](#adr-011-rbac-üyelik-paketleri-ve-yönetici-arayüzü-tekil-frontend-vs-izole-subdomain-notu)
 
 ---
 
@@ -154,3 +155,17 @@ Bu doküman, MakeItTiny projesinin geliştirilme sürecinde alınan temel mimari
   * Redis Hash kullanımı sayesinde tüm nesneyi serialize/deserialize etmeye gerek kalmadan tekil alanlar (`clicks`, `target_url`) atomik olarak güncellenebilir.
   * Önce PostgreSQL ardından Redis güncellemesi yapılarak kalıcı veri tutarlılığı (consistency) garanti altına alınır.
   * Argon2id ve kriptografik Base62 ile hem parola güvenliği hem de kısa linklerin tahmin edilemezliği sağlanır.
+
+---
+
+### ADR-011: RBAC, Üyelik Paketleri ve Yönetici Arayüzü (Tekil Frontend vs İzole Subdomain Notu)
+
+* **Durum:** Kabul Edildi (İleriye Dönük Mimari Not İçerir)
+* **Bağlam:** Sisteme standart kullanıcıların (`user`) yanı sıra yöneticiler (`admin`) ve sistemin tek sahibi (`owner`) eklendi; ayrıca üyelik paketleri (`plans`: `free`, `pro`, `enterprise`) ve gelişmiş link kısıtlamaları (`public_id`, `is_active`, `expires_at`, `max_clicks`, `security_status`) tanımlandı. Yönetici ekranlarının ayrı bir `panel.localhost` subdomain/port servisi olarak mı yoksa mevcut `Frontend` içinde rol bazlı mı sunulacağı değerlendirildi.
+* **Karar:**
+  1. **Mevcut Aşama — Tekil Frontend (Rol Bazlı Dinamik Görünüm):** Ekstra Nginx sunucu bloğu, port (`3001`) ve ikinci bir konteyner karmaşasına girmemek adına şu aşamada tek `Frontend` projesi üzerinden devam edilmesine; arayüzün giriş yapan kullanıcının rolüne (`user`, `admin`, `owner`) ve paket yeteneklerine (`plan`) göre şekillenmesine karar verildi.
+  2. **İleriye Dönük Mimari Not (`panel.localhost` Fiziksel İzolasyon):** İleride müşteri arayüzüne yönetici ekranlarının boş HTML/CSS/JS şablonlarının dahi gitmemesi (tam fiziksel bundle izolasyonu) istendiğinde, `nginx.conf` içerisine `server_name panel.localhost;` bloğu eklenerek layout'tan arındırılmış bağımsız bir Backoffice Frontend servisine (`panel:3001`) geçilecektir.
+  3. **Tek Owner Kuralı ve 16 Haneli Link Public ID:** Veritabanı seviyesinde `idx_single_owner_role` kısmi benzersiz indeksi ile sistemde yalnızca 1 adet `owner` bulunması garanti altına alındı. Linklerin dış dünyaya ve detay URL'lerine (`/dashboard/links/{id}`) yansıyan kimlikleri sıralı sayı yerine 16 haneli rastgele Base62 (`public_id`) olarak değiştirildi; dahili `BIGINT id` ise yalnızca `logs` tablosuyla Foreign Key performansı için arka planda tutuldu.
+* **Gerekçe:**
+  * Geliştirme sürecinde sadeliği korumak için tek Frontend ile hız kazanılırken, güvenlik tamamen Backend RBAC (`RequireRole`) katmanında tutuldu.
+  * İleride kurumsal seviyede fiziksel UI izolasyonuna geçiş yolu (`panel.localhost`) kayıt altına alındı.

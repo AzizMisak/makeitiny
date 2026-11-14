@@ -18,10 +18,11 @@ INSERT INTO logs (
     browser,
     os,
     referer,
-    accept_language
+    accept_language,
+    country_code
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, link_id, ip_address, user_agent, device_type, browser, os, referer, accept_language, clicked_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, link_id, ip_address, user_agent, device_type, browser, os, referer, accept_language, clicked_at, country_code
 `
 
 type CreateLogParams struct {
@@ -33,6 +34,7 @@ type CreateLogParams struct {
 	Os             string `json:"os"`
 	Referer        string `json:"referer"`
 	AcceptLanguage string `json:"accept_language"`
+	CountryCode    string `json:"country_code"`
 }
 
 func (q *Queries) CreateLog(ctx context.Context, arg CreateLogParams) (Log, error) {
@@ -45,6 +47,7 @@ func (q *Queries) CreateLog(ctx context.Context, arg CreateLogParams) (Log, erro
 		arg.Os,
 		arg.Referer,
 		arg.AcceptLanguage,
+		arg.CountryCode,
 	)
 	var i Log
 	err := row.Scan(
@@ -58,13 +61,35 @@ func (q *Queries) CreateLog(ctx context.Context, arg CreateLogParams) (Log, erro
 		&i.Referer,
 		&i.AcceptLanguage,
 		&i.ClickedAt,
+		&i.CountryCode,
 	)
 	return i, err
 }
 
 const getLinkByAlias = `-- name: GetLinkByAlias :one
-SELECT id, COALESCE(user_id, 0)::BIGINT AS user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
-WHERE alias = $1
+SELECT
+    l.id,
+    l.public_id,
+    COALESCE(l.user_id, 0)::BIGINT AS user_id,
+    l.alias,
+    l.target_url,
+    l.password_hash,
+    l.clicks,
+    l.created_at,
+    l.wait_enabled,
+    l.wait_seconds,
+    l.title,
+    (l.is_active AND COALESCE(u.is_active, TRUE)) AS is_active,
+    l.expires_at,
+    l.max_clicks,
+    l.ad_enabled,
+    l.security_status,
+    l.security_checked_at,
+    l.qr_code_path,
+    l.updated_at
+FROM links l
+LEFT JOIN users u ON u.id = l.user_id
+WHERE l.alias = $1
 LIMIT 1
 `
 
@@ -73,6 +98,7 @@ func (q *Queries) GetLinkByAlias(ctx context.Context, alias string) (Link, error
 	var i Link
 	err := row.Scan(
 		&i.ID,
+		&i.PublicID,
 		&i.UserID,
 		&i.Alias,
 		&i.TargetUrl,
@@ -81,6 +107,15 @@ func (q *Queries) GetLinkByAlias(ctx context.Context, alias string) (Link, error
 		&i.CreatedAt,
 		&i.WaitEnabled,
 		&i.WaitSeconds,
+		&i.Title,
+		&i.IsActive,
+		&i.ExpiresAt,
+		&i.MaxClicks,
+		&i.AdEnabled,
+		&i.SecurityStatus,
+		&i.SecurityCheckedAt,
+		&i.QrCodePath,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

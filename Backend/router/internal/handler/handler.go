@@ -52,7 +52,8 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 // Redirect: Şifresiz ve bekletmesiz linklerde 302 Found + Cache-Control: no-store, no-cache ile hedef URL'e yönlendirir.
 // Şifreli linklerde kullanıcıyı Frontend üzerindeki /unlock/{link} ekranına yönlendirir.
 // Bekletme açık olan linklerde kullanıcıyı Frontend üzerindeki /w/{link} ekranına yönlendirir.
-// Kısa link bulunamadığında veya hedef adrese ulaşılamadığında Frontend üzerindeki /error/{link} hata sayfasına yönlendirir.
+// Kısa link bulunamadığında, pasife çekildiğinde, engellendiğinde, süresi/limiti dolduğunda veya hedef adrese ulaşılamadığında
+// Frontend üzerindeki /error/{link} hata sayfasına yönlendirir.
 func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request, link string) {
 	meta := extractClickMeta(r)
 	target, err := h.redirects.Resolve(r.Context(), link, meta)
@@ -68,6 +69,26 @@ func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request, link string) 
 			waitURL := h.frontendURL + "/w/" + escapedLink
 			w.Header().Set("Cache-Control", "no-store, no-cache")
 			w.Header().Set("Location", waitURL)
+			w.WriteHeader(http.StatusFound)
+		case errors.Is(err, service.ErrLinkDisabled):
+			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=disabled"
+			w.Header().Set("Cache-Control", "no-store, no-cache")
+			w.Header().Set("Location", errURL)
+			w.WriteHeader(http.StatusFound)
+		case errors.Is(err, service.ErrLinkBlocked):
+			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=blocked"
+			w.Header().Set("Cache-Control", "no-store, no-cache")
+			w.Header().Set("Location", errURL)
+			w.WriteHeader(http.StatusFound)
+		case errors.Is(err, service.ErrLinkExpired):
+			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=expired"
+			w.Header().Set("Cache-Control", "no-store, no-cache")
+			w.Header().Set("Location", errURL)
+			w.WriteHeader(http.StatusFound)
+		case errors.Is(err, service.ErrLinkLimitReached):
+			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=limit_reached"
+			w.Header().Set("Cache-Control", "no-store, no-cache")
+			w.Header().Set("Location", errURL)
 			w.WriteHeader(http.StatusFound)
 		case errors.Is(err, service.ErrLinkNotFound):
 			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=not_found"
@@ -105,6 +126,14 @@ func (h *Handler) Unlock(w http.ResponseWriter, r *http.Request, link string) {
 		switch {
 		case errors.Is(err, service.ErrInvalidPassword):
 			writeError(w, http.StatusUnauthorized, "invalid_password", "Girdiğiniz parola hatalı.")
+		case errors.Is(err, service.ErrLinkDisabled):
+			writeError(w, http.StatusGone, "link_disabled", err.Error())
+		case errors.Is(err, service.ErrLinkBlocked):
+			writeError(w, http.StatusForbidden, "link_blocked", err.Error())
+		case errors.Is(err, service.ErrLinkExpired):
+			writeError(w, http.StatusGone, "link_expired", err.Error())
+		case errors.Is(err, service.ErrLinkLimitReached):
+			writeError(w, http.StatusGone, "link_limit_reached", err.Error())
 		case errors.Is(err, service.ErrLinkNotFound):
 			writeError(w, http.StatusNotFound, "link_not_found", "Aradığınız kısa link bulunamadı.")
 		case errors.Is(err, service.ErrTargetUnreachable):
@@ -123,11 +152,20 @@ func (h *Handler) Unlock(w http.ResponseWriter, r *http.Request, link string) {
 func (h *Handler) Preview(w http.ResponseWriter, r *http.Request, link string) {
 	rec, err := h.redirects.Preview(r.Context(), link)
 	if err != nil {
-		if errors.Is(err, service.ErrLinkNotFound) {
+		switch {
+		case errors.Is(err, service.ErrLinkDisabled):
+			writeError(w, http.StatusGone, "link_disabled", err.Error())
+		case errors.Is(err, service.ErrLinkBlocked):
+			writeError(w, http.StatusForbidden, "link_blocked", err.Error())
+		case errors.Is(err, service.ErrLinkExpired):
+			writeError(w, http.StatusGone, "link_expired", err.Error())
+		case errors.Is(err, service.ErrLinkLimitReached):
+			writeError(w, http.StatusGone, "link_limit_reached", err.Error())
+		case errors.Is(err, service.ErrLinkNotFound):
 			writeError(w, http.StatusNotFound, "link_not_found", "Aradığınız kısa link bulunamadı.")
-			return
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Önizleme bilgisi alınamadı.")
 		}
-		writeError(w, http.StatusInternalServerError, "internal_error", "Önizleme bilgisi alınamadı.")
 		return
 	}
 
@@ -144,6 +182,35 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request, link string) {
 		WaitEnabled: rec.WaitEnabled,
 		WaitSeconds: rec.WaitSeconds,
 	})
+}
+
+var langToCountryMap = map[string]string{
+	"tr": "TR", "en": "US", "de": "DE", "fr": "FR", "es": "ES",
+	"it": "IT", "nl": "NL", "ru": "RU", "az": "AZ", "ar": "SA",
+	"pt": "PT", "zh": "CN", "ja": "JP", "ko": "KR", "pl": "PL",
+	"uk": "UA", "el": "GR", "bg": "BG", "ro": "RO",
+}
+
+func resolveCountryCode(r *http.Request, acceptLang string) string {
+	for _, hdr := range []string{"CF-IPCountry", "X-Country-Code"} {
+		if c := strings.ToUpper(strings.TrimSpace(r.Header.Get(hdr))); len(c) == 2 && c != "XX" {
+			return c
+		}
+	}
+	if acceptLang == "" || acceptLang == "-" {
+		return ""
+	}
+	normalized := strings.ReplaceAll(acceptLang, "_", "-")
+	parts := strings.Split(normalized, "-")
+	if len(parts) >= 2 && len(parts[1]) == 2 {
+		return strings.ToUpper(parts[1])
+	}
+	if len(parts) >= 1 {
+		if code, ok := langToCountryMap[strings.ToLower(parts[0])]; ok {
+			return code
+		}
+	}
+	return ""
 }
 
 func extractClickMeta(r *http.Request) service.ClickLogMeta {
@@ -179,6 +246,8 @@ func extractClickMeta(r *http.Request) service.ClickLogMeta {
 		lang = "-"
 	}
 
+	countryCode := resolveCountryCode(r, lang)
+
 	return service.ClickLogMeta{
 		IPAddress:      ip,
 		UserAgent:      ua,
@@ -187,6 +256,7 @@ func extractClickMeta(r *http.Request) service.ClickLogMeta {
 		OS:             osName,
 		Referer:        referer,
 		AcceptLanguage: lang,
+		CountryCode:    countryCode,
 	}
 }
 

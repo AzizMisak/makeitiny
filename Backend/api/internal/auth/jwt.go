@@ -16,17 +16,19 @@ var (
 )
 
 type Claims struct {
-	UserID int64  `json:"user_id"`
-	Email  string `json:"email"`
+	UserID int64    `json:"user_id"`
+	Email  string   `json:"email"`
+	Roles  []string `json:"roles,omitempty"`
 	jwt.RegisteredClaims
 }
 
 // GenerateToken kullanıcı için 7 gün geçerli HS256 JWT üretir.
-func GenerateToken(secret string, userID int64, email string) (string, error) {
+func GenerateToken(secret string, userID int64, email string, roles []string) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		UserID: userID,
 		Email:  email,
+		Roles:  roles,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   strconv.FormatInt(userID, 10),
 			IssuedAt:  jwt.NewNumericDate(now),

@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: MakeItTiny API
-  version: 0.1.0
-  description: MakeItTiny kullanıcı yönetimi, kimlik doğrulama ve kısa link CRUD servisi.
+  version: 0.2.0
+  description: MakeItTiny kullanıcı yönetimi, kimlik doğrulama, kısa link CRUD, üyelik paketleri ve RBAC yönetim servisi.
 servers:
   - url: http://localhost/api
     description: API (Nginx Reverse Proxy)
@@ -11,7 +11,9 @@ servers:
 tags:
   - name: Health
   - name: Auth
+  - name: Plans
   - name: Links
+  - name: Admin
 paths:
   /health:
     get:
@@ -26,6 +28,21 @@ paths:
               schema:
                 type: string
                 example: Healthy
+
+  /plans:
+    get:
+      operationId: listPlans
+      tags: [Plans]
+      summary: Sistemdeki tüm üyelik paketlerini ve limitlerini listele
+      responses:
+        '200':
+          description: Üyelik paketleri listesi
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlanItem'
 
   /auth/register:
     post:
@@ -88,6 +105,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Hesap askıya alınmış
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
   /auth/logout:
     post:
@@ -145,7 +168,7 @@ paths:
     get:
       operationId: getCurrentUser
       tags: [Auth]
-      summary: Oturumdaki kullanıcı bilgisini getir
+      summary: Oturumdaki kullanıcı bilgisini, rollerini, paketini ve kullanım kotasını getir
       security:
         - bearerAuth: []
       responses:
@@ -157,6 +180,12 @@ paths:
                 $ref: '#/components/schemas/User'
         '401':
           description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Hesap askıya alınmış
           content:
             application/json:
               schema:
@@ -205,6 +234,12 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '401':
           description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Paket kota veya özellik sınırı aşıldı
           content:
             application/json:
               schema:
@@ -323,7 +358,7 @@ paths:
     patch:
       operationId: updateLink
       tags: [Links]
-      summary: Mevcut bir linki düzenle (hedef URL, alias veya parola)
+      summary: Mevcut bir linki düzenle
       security:
         - bearerAuth: []
       requestBody:
@@ -347,6 +382,12 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '401':
           description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Paket özellik sınırı aşıldı
           content:
             application/json:
               schema:
@@ -436,6 +477,386 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /admin/stats:
+    get:
+      operationId: adminGetStats
+      tags: [Admin]
+      summary: Sistem genelindeki kullanıcı, link ve tıklama istatistiklerini getir (admin/owner)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Platform istatistikleri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminStatsResponse'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Yetersiz rol yetkisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /admin/links:
+    get:
+      operationId: adminListLinks
+      tags: [Admin]
+      summary: Sistemdeki tüm linkleri filtreli ve sayfalı olarak listele (admin/owner)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, active, inactive, blocked]
+      responses:
+        '200':
+          description: Tüm linklerin sayfalı listesi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminPaginatedLinksResponse'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Yetersiz rol yetkisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /admin/links/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      operationId: adminUpdateLink
+      tags: [Admin]
+      summary: Herhangi bir linke müdahale et / düzenle (admin/owner)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateLinkRequest'
+      responses:
+        '200':
+          description: Güncellenmiş link bilgisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkItem'
+        '400':
+          description: Geçersiz istek verisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Yetersiz rol yetkisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      operationId: adminDeleteLink
+      tags: [Admin]
+      summary: Herhangi bir linki sistemden sil (admin/owner)
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Link silindi
+        '403':
+          description: Yetersiz rol yetkisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /admin/link-logs/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: adminListLinkLogs
+      tags: [Admin]
+      summary: Herhangi bir linkin tüm tıklama loglarını sayfalı getir (admin/owner)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Linkin tıklama logları
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedLogsResponse'
+        '403':
+          description: Yetersiz rol yetkisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /admin/users:
+    get:
+      operationId: adminListUsers
+      tags: [Admin]
+      summary: Sistemdeki tüm kullanıcıları filtreli ve sayfalı olarak listele (admin/owner)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Kullanıcıların sayfalı listesi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminPaginatedUsersResponse'
+        '403':
+          description: Yetersiz rol yetkisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /admin/users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      operationId: adminUpdateUser
+      tags: [Admin]
+      summary: Kullanıcının aktiflik durumunu (ban) veya paketini güncelle (admin/owner)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateUserRequest'
+      responses:
+        '200':
+          description: Güncellenmiş kullanıcı bilgisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: Geçersiz istek
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Yetersiz yetki
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Kullanıcı bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /admin/user-role/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      operationId: adminUpdateUserRole
+      tags: [Admin]
+      summary: Kullanıcının rolünü değiştir (yalnızca owner)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateRoleRequest'
+      responses:
+        '200':
+          description: Güncellenmiş kullanıcı bilgisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: Geçersiz rol
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Yalnızca owner bu işlemi yapabilir
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Kullanıcı bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /admin/plans/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int32
+    patch:
+      operationId: adminUpdatePlan
+      tags: [Admin]
+      summary: Üyelik paketi limit ve özelliklerini güncelle (yalnızca owner)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdatePlanRequest'
+      responses:
+        '200':
+          description: Güncellenmiş paket bilgisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanItem'
+        '400':
+          description: Geçersiz istek
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Yalnızca owner bu işlemi yapabilir
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Paket bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -473,12 +894,66 @@ components:
           type: string
           example: İşlem başarıyla tamamlandı.
 
+    PlanItem:
+      type: object
+      required:
+        - id
+        - slug
+        - name
+        - priceMonthly
+        - maxLinks
+        - allowCustomAlias
+        - allowPassword
+        - allowQr
+        - allowAds
+        - analyticsDays
+      properties:
+        id:
+          type: integer
+          format: int32
+          example: 1
+        slug:
+          type: string
+          example: free
+        name:
+          type: string
+          example: Ücretsiz Paket
+        priceMonthly:
+          type: number
+          format: double
+          example: 0
+        maxLinks:
+          type: integer
+          format: int32
+          example: 50
+        allowCustomAlias:
+          type: boolean
+          example: false
+        allowPassword:
+          type: boolean
+          example: true
+        allowQr:
+          type: boolean
+          example: false
+        allowAds:
+          type: boolean
+          example: false
+        analyticsDays:
+          type: integer
+          format: int32
+          example: 7
+
     User:
       type: object
       required:
         - id
         - name
         - email
+        - isActive
+        - roles
+        - plan
+        - linkCount
+        - createdAt
       properties:
         id:
           type: string
@@ -490,6 +965,26 @@ components:
           type: string
           format: email
           example: aziz@makeitiny.com
+        isActive:
+          type: boolean
+          example: true
+        roles:
+          type: array
+          items:
+            type: string
+          example: ["user"]
+        plan:
+          $ref: '#/components/schemas/PlanItem'
+        planExpiresAt:
+          type: string
+          example: "2027-01-01"
+        linkCount:
+          type: integer
+          format: int64
+          example: 12
+        createdAt:
+          type: string
+          example: "2026-11-14"
 
     RegisterRequest:
       type: object
@@ -560,6 +1055,10 @@ components:
         - locked
         - waitEnabled
         - waitSeconds
+        - title
+        - isActive
+        - adEnabled
+        - securityStatus
         - createdAt
       properties:
         id:
@@ -572,6 +1071,9 @@ components:
           type: string
           format: uri
           example: https://magaza.example.com/kampanyalar/yaz-indirimi
+        title:
+          type: string
+          example: Yaz Kampanyası
         clicks:
           type: integer
           format: int64
@@ -586,9 +1088,44 @@ components:
           type: integer
           format: int32
           example: 0
+        isActive:
+          type: boolean
+          example: true
+        expiresAt:
+          type: string
+          example: "2027-01-01"
+        maxClicks:
+          type: integer
+          format: int64
+          example: 5000
+        adEnabled:
+          type: boolean
+          example: false
+        securityStatus:
+          type: string
+          example: "unchecked"
         createdAt:
           type: string
           example: "2026-10-02"
+
+    AdminLinkItem:
+      allOf:
+        - $ref: '#/components/schemas/LinkItem'
+        - type: object
+          required:
+            - userId
+            - userEmail
+            - userName
+          properties:
+            userId:
+              type: string
+              example: "1"
+            userEmail:
+              type: string
+              example: "admin@admin.com"
+            userName:
+              type: string
+              example: "admin"
 
     LinkLogItem:
       type: object
@@ -602,6 +1139,7 @@ components:
         - os
         - referer
         - acceptLanguage
+        - countryCode
         - clickedAt
       properties:
         id:
@@ -631,6 +1169,9 @@ components:
         acceptLanguage:
           type: string
           example: "tr-TR"
+        countryCode:
+          type: string
+          example: "TR"
         clickedAt:
           type: string
           example: "2026-11-12 11:45:00"
@@ -724,6 +1265,9 @@ components:
           minLength: 3
           maxLength: 32
           example: kampanya-yaz
+        title:
+          type: string
+          example: Yaz Kampanyası
         password:
           type: string
           example: gizli123
@@ -734,6 +1278,17 @@ components:
           type: integer
           format: int32
           example: 5
+        expiresAt:
+          type: string
+          description: ISO 8601 veya YYYY-MM-DD tarih formatı
+          example: "2027-01-01"
+        maxClicks:
+          type: integer
+          format: int64
+          example: 1000
+        adEnabled:
+          type: boolean
+          example: false
 
     UpdateLinkRequest:
       type: object
@@ -747,6 +1302,9 @@ components:
           minLength: 3
           maxLength: 32
           example: yeni-kampanya
+        title:
+          type: string
+          example: Yeni Başlık
         password:
           type: string
           description: Boş string gönderilirse parola kaldırılır, dolu gönderilirse güncellenir.
@@ -758,6 +1316,21 @@ components:
           type: integer
           format: int32
           example: 10
+        isActive:
+          type: boolean
+          example: true
+        expiresAt:
+          type: string
+          description: Boş string gönderilirse süre sınırı kaldırılır.
+          example: "2027-01-01"
+        maxClicks:
+          type: integer
+          format: int64
+          description: 0 veya negatif gönderilirse tıklama sınırı kaldırılır.
+          example: 1000
+        adEnabled:
+          type: boolean
+          example: false
 
     AliasCheckResult:
       type: object
@@ -771,3 +1344,164 @@ components:
         available:
           type: boolean
           example: true
+
+    AdminStatsResponse:
+      type: object
+      required:
+        - totalUsers
+        - activeUsers
+        - totalLinks
+        - activeLinks
+        - blockedLinks
+        - totalClicks
+      properties:
+        totalUsers:
+          type: integer
+          format: int64
+          example: 25
+        activeUsers:
+          type: integer
+          format: int64
+          example: 24
+        totalLinks:
+          type: integer
+          format: int64
+          example: 340
+        activeLinks:
+          type: integer
+          format: int64
+          example: 332
+        blockedLinks:
+          type: integer
+          format: int64
+          example: 3
+        totalClicks:
+          type: integer
+          format: int64
+          example: 15820
+
+    AdminPaginatedLinksResponse:
+      type: object
+      required:
+        - items
+        - page
+        - limit
+        - total
+        - totalPages
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminLinkItem'
+        page:
+          type: integer
+          format: int32
+          example: 1
+        limit:
+          type: integer
+          format: int32
+          example: 20
+        total:
+          type: integer
+          format: int64
+          example: 340
+        totalPages:
+          type: integer
+          format: int32
+          example: 17
+
+    AdminUpdateLinkRequest:
+      allOf:
+        - $ref: '#/components/schemas/UpdateLinkRequest'
+        - type: object
+          properties:
+            securityStatus:
+              type: string
+              enum: [unchecked, safe, suspicious, malicious, blocked]
+              example: safe
+
+    AdminPaginatedUsersResponse:
+      type: object
+      required:
+        - items
+        - page
+        - limit
+        - total
+        - totalPages
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        page:
+          type: integer
+          format: int32
+          example: 1
+        limit:
+          type: integer
+          format: int32
+          example: 20
+        total:
+          type: integer
+          format: int64
+          example: 25
+        totalPages:
+          type: integer
+          format: int32
+          example: 2
+
+    AdminUpdateUserRequest:
+      type: object
+      properties:
+        isActive:
+          type: boolean
+          example: true
+        planId:
+          type: integer
+          format: int32
+          example: 2
+        planExpiresAt:
+          type: string
+          description: Boş string gönderilirse paket bitiş süresi kaldırılır (süresiz).
+          example: "2027-01-01"
+
+    AdminUpdateRoleRequest:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          type: string
+          enum: [user, admin]
+          example: admin
+
+    AdminUpdatePlanRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: Pro Paket
+        priceMonthly:
+          type: number
+          format: double
+          example: 99
+        maxLinks:
+          type: integer
+          format: int32
+          example: 1000
+        allowCustomAlias:
+          type: boolean
+          example: true
+        allowPassword:
+          type: boolean
+          example: true
+        allowQr:
+          type: boolean
+          example: true
+        allowAds:
+          type: boolean
+          example: true
+        analyticsDays:
+          type: integer
+          format: int32
+          example: 90

@@ -20,6 +20,10 @@ import (
 
 var (
 	ErrLinkNotFound      = errors.New("aradığınız kısa link bulunamadı")
+	ErrLinkDisabled      = errors.New("bu kısa link devre dışı bırakılmıştır")
+	ErrLinkBlocked       = errors.New("bu kısa link güvenlik nedeniyle engellenmiştir")
+	ErrLinkExpired       = errors.New("bu kısa linkin kullanım süresi dolmuştur")
+	ErrLinkLimitReached  = errors.New("bu kısa link maksimum tıklama sınırına ulaşmıştır")
 	ErrLinkLocked        = errors.New("bu kısa link parola korumalıdır")
 	ErrLinkWaiting       = errors.New("bu kısa link bekletme sayfasına yönlendiriliyor")
 	ErrInvalidPassword   = errors.New("girdiğiniz parola hatalı")
@@ -39,6 +43,7 @@ type ClickLogMeta struct {
 	OS             string
 	Referer        string
 	AcceptLanguage string
+	CountryCode    string
 }
 
 // RedirectService yönlendirme, kilit açma ve önizleme iş mantığı.
@@ -50,13 +55,34 @@ func NewRedirectService(links *repository.LinkRepository) *RedirectService {
 	return &RedirectService{links: links}
 }
 
-// Resolve kısa linki çözümler. Şifre çözülmese veya bekletme sayfası açık olsa bile tıklama sayısını artırır ve cihaz logunu yazar.
+func validateLinkAccess(rec repository.LinkRecord) error {
+	if !rec.IsActive {
+		return ErrLinkDisabled
+	}
+	if rec.SecurityStatus == "blocked" || rec.SecurityStatus == "malicious" {
+		return ErrLinkBlocked
+	}
+	if rec.ExpiresAtUnix > 0 && time.Now().Unix() >= rec.ExpiresAtUnix {
+		return ErrLinkExpired
+	}
+	if rec.MaxClicks > 0 && rec.Clicks >= rec.MaxClicks {
+		return ErrLinkLimitReached
+	}
+	return nil
+}
+
+// Resolve kısa linki çözümler. Önce aktiflik, güvenlik, süre ve tıklama limitini kontrol eder;
+// geçerliyse tıklama sayısını artırır ve cihaz logunu yazar.
 func (s *RedirectService) Resolve(ctx context.Context, alias string, meta ClickLogMeta) (string, error) {
 	rec, err := s.links.GetByAlias(ctx, strings.TrimSpace(alias))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrLinkNotFound
 		}
+		return "", err
+	}
+
+	if err := validateLinkAccess(rec); err != nil {
 		return "", err
 	}
 
@@ -71,6 +97,7 @@ func (s *RedirectService) Resolve(ctx context.Context, alias string, meta ClickL
 			Os:             meta.OS,
 			Referer:        meta.Referer,
 			AcceptLanguage: meta.AcceptLanguage,
+			CountryCode:    meta.CountryCode,
 		})
 	}
 
@@ -97,6 +124,10 @@ func (s *RedirectService) Unlock(ctx context.Context, alias, password string) (s
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrLinkNotFound
 		}
+		return "", err
+	}
+
+	if err := validateLinkAccess(rec); err != nil {
 		return "", err
 	}
 
@@ -167,6 +198,9 @@ func (s *RedirectService) Preview(ctx context.Context, alias string) (repository
 		if errors.Is(err, pgx.ErrNoRows) {
 			return repository.LinkRecord{}, ErrLinkNotFound
 		}
+		return repository.LinkRecord{}, err
+	}
+	if err := validateLinkAccess(rec); err != nil {
 		return repository.LinkRecord{}, err
 	}
 	return rec, nil

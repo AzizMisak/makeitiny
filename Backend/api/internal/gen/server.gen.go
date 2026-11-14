@@ -14,6 +14,279 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AdminUpdateLinkRequestSecurityStatus.
+const (
+	AdminUpdateLinkRequestSecurityStatusBlocked    AdminUpdateLinkRequestSecurityStatus = "blocked"
+	AdminUpdateLinkRequestSecurityStatusMalicious  AdminUpdateLinkRequestSecurityStatus = "malicious"
+	AdminUpdateLinkRequestSecurityStatusSafe       AdminUpdateLinkRequestSecurityStatus = "safe"
+	AdminUpdateLinkRequestSecurityStatusSuspicious AdminUpdateLinkRequestSecurityStatus = "suspicious"
+	AdminUpdateLinkRequestSecurityStatusUnchecked  AdminUpdateLinkRequestSecurityStatus = "unchecked"
+)
+
+// Valid indicates whether the value is a known member of the AdminUpdateLinkRequestSecurityStatus enum.
+func (e AdminUpdateLinkRequestSecurityStatus) Valid() bool {
+	switch e {
+	case AdminUpdateLinkRequestSecurityStatusBlocked:
+		return true
+	case AdminUpdateLinkRequestSecurityStatusMalicious:
+		return true
+	case AdminUpdateLinkRequestSecurityStatusSafe:
+		return true
+	case AdminUpdateLinkRequestSecurityStatusSuspicious:
+		return true
+	case AdminUpdateLinkRequestSecurityStatusUnchecked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminUpdateRoleRequestRole.
+const (
+	AdminUpdateRoleRequestRoleAdmin AdminUpdateRoleRequestRole = "admin"
+	AdminUpdateRoleRequestRoleUser  AdminUpdateRoleRequestRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the AdminUpdateRoleRequestRole enum.
+func (e AdminUpdateRoleRequestRole) Valid() bool {
+	switch e {
+	case AdminUpdateRoleRequestRoleAdmin:
+		return true
+	case AdminUpdateRoleRequestRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminListLinksParamsStatus.
+const (
+	AdminListLinksParamsStatusActive   AdminListLinksParamsStatus = "active"
+	AdminListLinksParamsStatusAll      AdminListLinksParamsStatus = "all"
+	AdminListLinksParamsStatusBlocked  AdminListLinksParamsStatus = "blocked"
+	AdminListLinksParamsStatusInactive AdminListLinksParamsStatus = "inactive"
+)
+
+// Valid indicates whether the value is a known member of the AdminListLinksParamsStatus enum.
+func (e AdminListLinksParamsStatus) Valid() bool {
+	switch e {
+	case AdminListLinksParamsStatusActive:
+		return true
+	case AdminListLinksParamsStatusAll:
+		return true
+	case AdminListLinksParamsStatusBlocked:
+		return true
+	case AdminListLinksParamsStatusInactive:
+		return true
+	default:
+		return false
+	}
+}
+
+// AdminLinkItem defines model for AdminLinkItem.
+type AdminLinkItem struct {
+	// AdEnabled Example: false
+	AdEnabled bool `json:"adEnabled"`
+
+	// Alias Example: kampanya-yaz
+	Alias string `json:"alias"`
+
+	// Clicks Example: 1284
+	Clicks int64 `json:"clicks"`
+
+	// CreatedAt Example: 2026-10-02
+	CreatedAt string `json:"createdAt"`
+
+	// ExpiresAt Example: 2027-01-01
+	ExpiresAt *string `json:"expiresAt,omitempty"`
+
+	// Id Example: k9Xm2pQ7vR4nL8wZ
+	Id string `json:"id"`
+
+	// IsActive Example: true
+	IsActive bool `json:"isActive"`
+
+	// Locked Example: false
+	Locked bool `json:"locked"`
+
+	// MaxClicks Example: 5000
+	MaxClicks *int64 `json:"maxClicks,omitempty"`
+
+	// SecurityStatus Example: unchecked
+	SecurityStatus string `json:"securityStatus"`
+
+	// Target Example: https://magaza.example.com/kampanyalar/yaz-indirimi
+	Target string `json:"target"`
+
+	// Title Example: Yaz Kampanyası
+	Title string `json:"title"`
+
+	// UserEmail Example: admin@admin.com
+	UserEmail string `json:"userEmail"`
+
+	// UserId Example: 1
+	UserId string `json:"userId"`
+
+	// UserName Example: admin
+	UserName string `json:"userName"`
+
+	// WaitEnabled Example: false
+	WaitEnabled bool `json:"waitEnabled"`
+
+	// WaitSeconds Example: 0
+	WaitSeconds int32 `json:"waitSeconds"`
+}
+
+// AdminPaginatedLinksResponse defines model for AdminPaginatedLinksResponse.
+type AdminPaginatedLinksResponse struct {
+	Items []AdminLinkItem `json:"items"`
+
+	// Limit Example: 20
+	Limit int32 `json:"limit"`
+
+	// Page Example: 1
+	Page int32 `json:"page"`
+
+	// Total Example: 340
+	Total int64 `json:"total"`
+
+	// TotalPages Example: 17
+	TotalPages int32 `json:"totalPages"`
+}
+
+// AdminPaginatedUsersResponse defines model for AdminPaginatedUsersResponse.
+type AdminPaginatedUsersResponse struct {
+	Items []User `json:"items"`
+
+	// Limit Example: 20
+	Limit int32 `json:"limit"`
+
+	// Page Example: 1
+	Page int32 `json:"page"`
+
+	// Total Example: 25
+	Total int64 `json:"total"`
+
+	// TotalPages Example: 2
+	TotalPages int32 `json:"totalPages"`
+}
+
+// AdminStatsResponse defines model for AdminStatsResponse.
+type AdminStatsResponse struct {
+	// ActiveLinks Example: 332
+	ActiveLinks int64 `json:"activeLinks"`
+
+	// ActiveUsers Example: 24
+	ActiveUsers int64 `json:"activeUsers"`
+
+	// BlockedLinks Example: 3
+	BlockedLinks int64 `json:"blockedLinks"`
+
+	// TotalClicks Example: 15820
+	TotalClicks int64 `json:"totalClicks"`
+
+	// TotalLinks Example: 340
+	TotalLinks int64 `json:"totalLinks"`
+
+	// TotalUsers Example: 25
+	TotalUsers int64 `json:"totalUsers"`
+}
+
+// AdminUpdateLinkRequest defines model for AdminUpdateLinkRequest.
+type AdminUpdateLinkRequest struct {
+	// AdEnabled Example: false
+	AdEnabled *bool `json:"adEnabled,omitempty"`
+
+	// Alias Example: yeni-kampanya
+	Alias *string `json:"alias,omitempty"`
+
+	// ExpiresAt Boş string gönderilirse süre sınırı kaldırılır.
+	//
+	// Example: 2027-01-01
+	ExpiresAt *string `json:"expiresAt,omitempty"`
+
+	// IsActive Example: true
+	IsActive *bool `json:"isActive,omitempty"`
+
+	// MaxClicks 0 veya negatif gönderilirse tıklama sınırı kaldırılır.
+	//
+	// Example: 1000
+	MaxClicks *int64 `json:"maxClicks,omitempty"`
+
+	// Password Boş string gönderilirse parola kaldırılır, dolu gönderilirse güncellenir.
+	//
+	// Example: yeniSifre123
+	Password *string `json:"password,omitempty"`
+
+	// SecurityStatus Example: safe
+	SecurityStatus *AdminUpdateLinkRequestSecurityStatus `json:"securityStatus,omitempty"`
+
+	// Target Example: https://magaza.example.com/yeni-hedef
+	Target *string `json:"target,omitempty"`
+
+	// Title Example: Yeni Başlık
+	Title *string `json:"title,omitempty"`
+
+	// WaitEnabled Example: true
+	WaitEnabled *bool `json:"waitEnabled,omitempty"`
+
+	// WaitSeconds Example: 10
+	WaitSeconds *int32 `json:"waitSeconds,omitempty"`
+}
+
+// AdminUpdateLinkRequestSecurityStatus Example: safe
+type AdminUpdateLinkRequestSecurityStatus string
+
+// AdminUpdatePlanRequest defines model for AdminUpdatePlanRequest.
+type AdminUpdatePlanRequest struct {
+	// AllowAds Example: true
+	AllowAds *bool `json:"allowAds,omitempty"`
+
+	// AllowCustomAlias Example: true
+	AllowCustomAlias *bool `json:"allowCustomAlias,omitempty"`
+
+	// AllowPassword Example: true
+	AllowPassword *bool `json:"allowPassword,omitempty"`
+
+	// AllowQr Example: true
+	AllowQr *bool `json:"allowQr,omitempty"`
+
+	// AnalyticsDays Example: 90
+	AnalyticsDays *int32 `json:"analyticsDays,omitempty"`
+
+	// MaxLinks Example: 1000
+	MaxLinks *int32 `json:"maxLinks,omitempty"`
+
+	// Name Example: Pro Paket
+	Name *string `json:"name,omitempty"`
+
+	// PriceMonthly Example: 99
+	PriceMonthly *float64 `json:"priceMonthly,omitempty"`
+}
+
+// AdminUpdateRoleRequest defines model for AdminUpdateRoleRequest.
+type AdminUpdateRoleRequest struct {
+	// Role Example: admin
+	Role AdminUpdateRoleRequestRole `json:"role"`
+}
+
+// AdminUpdateRoleRequestRole Example: admin
+type AdminUpdateRoleRequestRole string
+
+// AdminUpdateUserRequest defines model for AdminUpdateUserRequest.
+type AdminUpdateUserRequest struct {
+	// IsActive Example: true
+	IsActive *bool `json:"isActive,omitempty"`
+
+	// PlanExpiresAt Boş string gönderilirse paket bitiş süresi kaldırılır (süresiz).
+	//
+	// Example: 2027-01-01
+	PlanExpiresAt *string `json:"planExpiresAt,omitempty"`
+
+	// PlanId Example: 2
+	PlanId *int32 `json:"planId,omitempty"`
+}
+
 // AliasCheckResult defines model for AliasCheckResult.
 type AliasCheckResult struct {
 	// Alias Example: kampanya-yaz
@@ -44,14 +317,28 @@ type AuthResponse struct {
 
 // CreateLinkRequest defines model for CreateLinkRequest.
 type CreateLinkRequest struct {
+	// AdEnabled Example: false
+	AdEnabled *bool `json:"adEnabled,omitempty"`
+
 	// Alias Example: kampanya-yaz
 	Alias *string `json:"alias,omitempty"`
+
+	// ExpiresAt ISO 8601 veya YYYY-MM-DD tarih formatı
+	//
+	// Example: 2027-01-01
+	ExpiresAt *string `json:"expiresAt,omitempty"`
+
+	// MaxClicks Example: 1000
+	MaxClicks *int64 `json:"maxClicks,omitempty"`
 
 	// Password Example: gizli123
 	Password *string `json:"password,omitempty"`
 
 	// Target Example: https://magaza.example.com/kampanyalar/yaz-indirimi
 	Target string `json:"target"`
+
+	// Title Example: Yaz Kampanyası
+	Title *string `json:"title,omitempty"`
 
 	// WaitEnabled Example: false
 	WaitEnabled *bool `json:"waitEnabled,omitempty"`
@@ -62,6 +349,9 @@ type CreateLinkRequest struct {
 
 // LinkItem defines model for LinkItem.
 type LinkItem struct {
+	// AdEnabled Example: false
+	AdEnabled bool `json:"adEnabled"`
+
 	// Alias Example: kampanya-yaz
 	Alias string `json:"alias"`
 
@@ -71,14 +361,29 @@ type LinkItem struct {
 	// CreatedAt Example: 2026-10-02
 	CreatedAt string `json:"createdAt"`
 
-	// Id Example: 1
+	// ExpiresAt Example: 2027-01-01
+	ExpiresAt *string `json:"expiresAt,omitempty"`
+
+	// Id Example: k9Xm2pQ7vR4nL8wZ
 	Id string `json:"id"`
+
+	// IsActive Example: true
+	IsActive bool `json:"isActive"`
 
 	// Locked Example: false
 	Locked bool `json:"locked"`
 
+	// MaxClicks Example: 5000
+	MaxClicks *int64 `json:"maxClicks,omitempty"`
+
+	// SecurityStatus Example: unchecked
+	SecurityStatus string `json:"securityStatus"`
+
 	// Target Example: https://magaza.example.com/kampanyalar/yaz-indirimi
 	Target string `json:"target"`
+
+	// Title Example: Yaz Kampanyası
+	Title string `json:"title"`
 
 	// WaitEnabled Example: false
 	WaitEnabled bool `json:"waitEnabled"`
@@ -98,6 +403,9 @@ type LinkLogItem struct {
 	// ClickedAt Example: 2026-11-12 11:45:00
 	ClickedAt string `json:"clickedAt"`
 
+	// CountryCode Example: TR
+	CountryCode string `json:"countryCode"`
+
 	// DeviceType Example: Masaüstü
 	DeviceType string `json:"deviceType"`
 
@@ -107,7 +415,7 @@ type LinkLogItem struct {
 	// IpAddress Example: 127.0.0.1
 	IpAddress string `json:"ipAddress"`
 
-	// LinkId Example: 1
+	// LinkId Example: k9Xm2pQ7vR4nL8wZ
 	LinkId string `json:"linkId"`
 
 	// Os Example: Windows
@@ -176,6 +484,39 @@ type PaginatedLogsResponse struct {
 	TotalPages int32 `json:"totalPages"`
 }
 
+// PlanItem defines model for PlanItem.
+type PlanItem struct {
+	// AllowAds Example: false
+	AllowAds bool `json:"allowAds"`
+
+	// AllowCustomAlias Example: false
+	AllowCustomAlias bool `json:"allowCustomAlias"`
+
+	// AllowPassword Example: true
+	AllowPassword bool `json:"allowPassword"`
+
+	// AllowQr Example: false
+	AllowQr bool `json:"allowQr"`
+
+	// AnalyticsDays Example: 7
+	AnalyticsDays int32 `json:"analyticsDays"`
+
+	// Id Example: 1
+	Id int32 `json:"id"`
+
+	// MaxLinks Example: 50
+	MaxLinks int32 `json:"maxLinks"`
+
+	// Name Example: Ücretsiz Paket
+	Name string `json:"name"`
+
+	// PriceMonthly Example: 0
+	PriceMonthly float64 `json:"priceMonthly"`
+
+	// Slug Example: free
+	Slug string `json:"slug"`
+}
+
 // RegisterRequest defines model for RegisterRequest.
 type RegisterRequest struct {
 	// Email Example: aziz@makeitiny.com
@@ -199,8 +540,24 @@ type ResetPasswordRequest struct {
 
 // UpdateLinkRequest defines model for UpdateLinkRequest.
 type UpdateLinkRequest struct {
+	// AdEnabled Example: false
+	AdEnabled *bool `json:"adEnabled,omitempty"`
+
 	// Alias Example: yeni-kampanya
 	Alias *string `json:"alias,omitempty"`
+
+	// ExpiresAt Boş string gönderilirse süre sınırı kaldırılır.
+	//
+	// Example: 2027-01-01
+	ExpiresAt *string `json:"expiresAt,omitempty"`
+
+	// IsActive Example: true
+	IsActive *bool `json:"isActive,omitempty"`
+
+	// MaxClicks 0 veya negatif gönderilirse tıklama sınırı kaldırılır.
+	//
+	// Example: 1000
+	MaxClicks *int64 `json:"maxClicks,omitempty"`
 
 	// Password Boş string gönderilirse parola kaldırılır, dolu gönderilirse güncellenir.
 	//
@@ -209,6 +566,9 @@ type UpdateLinkRequest struct {
 
 	// Target Example: https://magaza.example.com/yeni-hedef
 	Target *string `json:"target,omitempty"`
+
+	// Title Example: Yeni Başlık
+	Title *string `json:"title,omitempty"`
 
 	// WaitEnabled Example: true
 	WaitEnabled *bool `json:"waitEnabled,omitempty"`
@@ -219,14 +579,54 @@ type UpdateLinkRequest struct {
 
 // User defines model for User.
 type User struct {
+	// CreatedAt Example: 2026-11-14
+	CreatedAt string `json:"createdAt"`
+
 	// Email Example: aziz@makeitiny.com
 	Email openapi_types.Email `json:"email"`
 
 	// Id Example: 1
 	Id string `json:"id"`
 
+	// IsActive Example: true
+	IsActive bool `json:"isActive"`
+
+	// LinkCount Example: 12
+	LinkCount int64 `json:"linkCount"`
+
 	// Name Example: aziz
-	Name string `json:"name"`
+	Name string   `json:"name"`
+	Plan PlanItem `json:"plan"`
+
+	// PlanExpiresAt Example: 2027-01-01
+	PlanExpiresAt *string `json:"planExpiresAt,omitempty"`
+
+	// Roles Example: ["user"]
+	Roles []string `json:"roles"`
+}
+
+// AdminListLinkLogsParams defines parameters for AdminListLinkLogs.
+type AdminListLinkLogsParams struct {
+	Page  *int32 `form:"page,omitempty" json:"page,omitempty"`
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// AdminListLinksParams defines parameters for AdminListLinks.
+type AdminListLinksParams struct {
+	Page   *int32                      `form:"page,omitempty" json:"page,omitempty"`
+	Limit  *int32                      `form:"limit,omitempty" json:"limit,omitempty"`
+	Search *string                     `form:"search,omitempty" json:"search,omitempty"`
+	Status *AdminListLinksParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+}
+
+// AdminListLinksParamsStatus defines parameters for AdminListLinks.
+type AdminListLinksParamsStatus string
+
+// AdminListUsersParams defines parameters for AdminListUsers.
+type AdminListUsersParams struct {
+	Page   *int32  `form:"page,omitempty" json:"page,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+	Search *string `form:"search,omitempty" json:"search,omitempty"`
 }
 
 // ListLinksParams defines parameters for ListLinks.
@@ -240,6 +640,18 @@ type ListLinkLogsParams struct {
 	Page  *int32 `form:"page,omitempty" json:"page,omitempty"`
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// AdminUpdateLinkJSONRequestBody defines body for AdminUpdateLink for application/json ContentType.
+type AdminUpdateLinkJSONRequestBody = AdminUpdateLinkRequest
+
+// AdminUpdatePlanJSONRequestBody defines body for AdminUpdatePlan for application/json ContentType.
+type AdminUpdatePlanJSONRequestBody = AdminUpdatePlanRequest
+
+// AdminUpdateUserRoleJSONRequestBody defines body for AdminUpdateUserRole for application/json ContentType.
+type AdminUpdateUserRoleJSONRequestBody = AdminUpdateRoleRequest
+
+// AdminUpdateUserJSONRequestBody defines body for AdminUpdateUser for application/json ContentType.
+type AdminUpdateUserJSONRequestBody = AdminUpdateUserRequest
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
@@ -258,6 +670,33 @@ type UpdateLinkJSONRequestBody = UpdateLinkRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// AdminListLinkLogs Herhangi bir linkin tüm tıklama loglarını sayfalı getir (admin/owner)
+	// (GET /admin/link-logs/{id})
+	AdminListLinkLogs(w http.ResponseWriter, r *http.Request, id string, params AdminListLinkLogsParams)
+	// AdminListLinks Sistemdeki tüm linkleri filtreli ve sayfalı olarak listele (admin/owner)
+	// (GET /admin/links)
+	AdminListLinks(w http.ResponseWriter, r *http.Request, params AdminListLinksParams)
+	// AdminDeleteLink Herhangi bir linki sistemden sil (admin/owner)
+	// (DELETE /admin/links/{id})
+	AdminDeleteLink(w http.ResponseWriter, r *http.Request, id string)
+	// AdminUpdateLink Herhangi bir linke müdahale et / düzenle (admin/owner)
+	// (PATCH /admin/links/{id})
+	AdminUpdateLink(w http.ResponseWriter, r *http.Request, id string)
+	// AdminUpdatePlan Üyelik paketi limit ve özelliklerini güncelle (yalnızca owner)
+	// (PATCH /admin/plans/{id})
+	AdminUpdatePlan(w http.ResponseWriter, r *http.Request, id int32)
+	// AdminGetStats Sistem genelindeki kullanıcı, link ve tıklama istatistiklerini getir (admin/owner)
+	// (GET /admin/stats)
+	AdminGetStats(w http.ResponseWriter, r *http.Request)
+	// AdminUpdateUserRole Kullanıcının rolünü değiştir (yalnızca owner)
+	// (PUT /admin/user-role/{id})
+	AdminUpdateUserRole(w http.ResponseWriter, r *http.Request, id string)
+	// AdminListUsers Sistemdeki tüm kullanıcıları filtreli ve sayfalı olarak listele (admin/owner)
+	// (GET /admin/users)
+	AdminListUsers(w http.ResponseWriter, r *http.Request, params AdminListUsersParams)
+	// AdminUpdateUser Kullanıcının aktiflik durumunu (ban) veya paketini güncelle (admin/owner)
+	// (PATCH /admin/users/{id})
+	AdminUpdateUser(w http.ResponseWriter, r *http.Request, id string)
 	// Login Kullanıcı girişi yap
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -273,7 +712,7 @@ type ServerInterface interface {
 	// DeleteUser Oturumdaki kullanıcının hesabını ve tüm linklerini sil
 	// (DELETE /auth/user)
 	DeleteUser(w http.ResponseWriter, r *http.Request)
-	// GetCurrentUser Oturumdaki kullanıcı bilgisini getir
+	// GetCurrentUser Oturumdaki kullanıcı bilgisini, rollerini, paketini ve kullanım kotasını getir
 	// (GET /auth/user)
 	GetCurrentUser(w http.ResponseWriter, r *http.Request)
 	// GetHealth Sağlık kontrolü
@@ -297,9 +736,12 @@ type ServerInterface interface {
 	// GetLink Kullanıcıya ait tek bir linkin detayını getir
 	// (GET /links/{id})
 	GetLink(w http.ResponseWriter, r *http.Request, id string)
-	// UpdateLink Mevcut bir linki düzenle (hedef URL, alias veya parola)
+	// UpdateLink Mevcut bir linki düzenle
 	// (PATCH /links/{id})
 	UpdateLink(w http.ResponseWriter, r *http.Request, id string)
+	// ListPlans Sistemdeki tüm üyelik paketlerini ve limitlerini listele
+	// (GET /plans)
+	ListPlans(w http.ResponseWriter, r *http.Request)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -310,6 +752,336 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// AdminListLinkLogs operation middleware
+func (siw *ServerInterfaceWrapper) AdminListLinkLogs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AdminListLinkLogsParams
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminListLinkLogs(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdminListLinks operation middleware
+func (siw *ServerInterfaceWrapper) AdminListLinks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AdminListLinksParams
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", r.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "search"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "search", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminListLinks(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdminDeleteLink operation middleware
+func (siw *ServerInterfaceWrapper) AdminDeleteLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminDeleteLink(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdminUpdateLink operation middleware
+func (siw *ServerInterfaceWrapper) AdminUpdateLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminUpdateLink(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdminUpdatePlan operation middleware
+func (siw *ServerInterfaceWrapper) AdminUpdatePlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id int32
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int32", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminUpdatePlan(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdminGetStats operation middleware
+func (siw *ServerInterfaceWrapper) AdminGetStats(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminGetStats(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdminUpdateUserRole operation middleware
+func (siw *ServerInterfaceWrapper) AdminUpdateUserRole(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminUpdateUserRole(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdminListUsers operation middleware
+func (siw *ServerInterfaceWrapper) AdminListUsers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AdminListUsersParams
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", r.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "search"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "search", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminListUsers(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdminUpdateUser operation middleware
+func (siw *ServerInterfaceWrapper) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminUpdateUser(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // Login operation middleware
 func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
@@ -628,6 +1400,20 @@ func (siw *ServerInterfaceWrapper) UpdateLink(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListPlans operation middleware
+func (siw *ServerInterfaceWrapper) ListPlans(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPlans(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -749,6 +1535,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/health", wrapper.GetHealth)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/plans", wrapper.ListPlans)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/register", wrapper.Register)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/login", wrapper.Login)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/logout", wrapper.Logout)
@@ -762,6 +1549,15 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links/{id}", wrapper.GetLink)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/links/{id}", wrapper.UpdateLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links/logs/{id}", wrapper.ListLinkLogs)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/stats", wrapper.AdminGetStats)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/links", wrapper.AdminListLinks)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/admin/links/{id}", wrapper.AdminDeleteLink)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/admin/links/{id}", wrapper.AdminUpdateLink)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/link-logs/{id}", wrapper.AdminListLinkLogs)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/users", wrapper.AdminListUsers)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/admin/users/{id}", wrapper.AdminUpdateUser)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/admin/user-role/{id}", wrapper.AdminUpdateUserRole)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/admin/plans/{id}", wrapper.AdminUpdatePlan)
 
 	return m
 }
