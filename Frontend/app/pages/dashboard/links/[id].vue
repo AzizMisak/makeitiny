@@ -28,19 +28,14 @@ const saveError = ref('')
 const copied = ref(false)
 const confirmDelete = ref(false)
 
-// Pagination (Sayfa başına 20 log kaydı)
+// Backend Pagination (Sayfa başına 20 log kaydı)
 const LOGS_PER_PAGE = 20
 const currentLogPage = ref(1)
+const totalLogs = ref(0)
+const totalLogPages = ref(1)
 
-const totalLogPages = computed(() => Math.max(1, Math.ceil(logs.value.length / LOGS_PER_PAGE)))
-
-const paginatedLogs = computed(() => {
-  const start = (currentLogPage.value - 1) * LOGS_PER_PAGE
-  return logs.value.slice(start, start + LOGS_PER_PAGE)
-})
-
-const logRangeStart = computed(() => (logs.value.length === 0 ? 0 : (currentLogPage.value - 1) * LOGS_PER_PAGE + 1))
-const logRangeEnd = computed(() => Math.min(currentLogPage.value * LOGS_PER_PAGE, logs.value.length))
+const logRangeStart = computed(() => (totalLogs.value === 0 ? 0 : (currentLogPage.value - 1) * LOGS_PER_PAGE + 1))
+const logRangeEnd = computed(() => Math.min(currentLogPage.value * LOGS_PER_PAGE, totalLogs.value))
 
 const visibleLogPages = computed<(number | '...')[]>(() => {
   const total = totalLogPages.value
@@ -60,9 +55,9 @@ const visibleLogPages = computed<(number | '...')[]>(() => {
   return pages
 })
 
-function goToLogPage(page: number) {
-  if (page < 1 || page > totalLogPages.value) return
-  currentLogPage.value = page
+async function goToLogPage(page: number) {
+  if (page < 1 || page > totalLogPages.value || page === currentLogPage.value) return
+  await loadLogs(page)
 }
 
 // Grafik ve Coğrafi Analiz Durumları
@@ -575,14 +570,15 @@ const accessModeLabel = computed(() => {
   return 'Herkese Açık'
 })
 
-async function loadLogs() {
+async function loadLogs(page = currentLogPage.value) {
   logsLoading.value = true
   logsError.value = ''
   try {
-    logs.value = await getLinkLogs(id.value)
-    if (currentLogPage.value > totalLogPages.value) {
-      currentLogPage.value = totalLogPages.value
-    }
+    const res = await getLinkLogs(id.value, page, LOGS_PER_PAGE)
+    logs.value = res.items ?? []
+    currentLogPage.value = res.page ?? 1
+    totalLogs.value = res.total ?? 0
+    totalLogPages.value = res.totalPages ?? 1
   } catch (e: any) {
     logsError.value = e?.message ?? 'Tıklama logları yüklenemedi.'
   } finally {
@@ -898,21 +894,21 @@ async function handleDelete() {
         </div>
       </div>
 
-      <!-- Tıklama Logları Bölümü (Pagination: 20 Kayıt / Sayfa) -->
+      <!-- Tıklama Logları Bölümü (Backend Pagination: 20 Kayıt / Sayfa) -->
       <div class="mt-8 rounded-lg border-[1.5px] border-ink bg-card p-6 shadow-hard sm:p-8">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div class="flex flex-wrap items-center gap-2.5">
               <h2 class="text-xl font-bold">Tıklama Logları</h2>
-              <UiBadge v-if="logs.length > 0" tone="neutral">
-                Toplam {{ logs.length }} kayıt • Sayfa başına {{ LOGS_PER_PAGE }}
+              <UiBadge v-if="totalLogs > 0" tone="neutral">
+                Toplam {{ totalLogs }} kayıt • Sayfa başına {{ LOGS_PER_PAGE }}
               </UiBadge>
             </div>
             <p class="mt-1 text-xs text-ink-3">
               Bu kısa linke tıklayan cihazların IP, tarayıcı, işletim sistemi ve yönlendiren kaynak kayıtları.
             </p>
           </div>
-          <UiButton variant="secondary" @click="loadLogs">
+          <UiButton variant="secondary" @click="loadLogs(currentLogPage)">
             <UiIcon name="refresh" :size="15" /> {{ logsLoading ? 'Yükleniyor...' : 'Logları Yenile' }}
           </UiButton>
         </div>
@@ -926,7 +922,7 @@ async function handleDelete() {
           <span class="text-sm font-medium">Tıklama logları yükleniyor...</span>
         </div>
 
-        <div v-else-if="logs.length === 0" class="mt-6 rounded-md border border-line bg-paper p-8 text-center">
+        <div v-else-if="totalLogs === 0" class="mt-6 rounded-md border border-line bg-paper p-8 text-center">
           <p class="text-sm font-semibold text-ink-2">Henüz tıklama logu bulunmuyor.</p>
           <p class="mt-1 text-xs text-ink-3">Kısa link ziyaret edildiğinde cihaz bilgileri burada listelenecektir.</p>
         </div>
@@ -934,7 +930,7 @@ async function handleDelete() {
         <template v-else>
           <ul class="mt-6 flex flex-col gap-3">
             <li
-              v-for="item in paginatedLogs"
+              v-for="item in logs"
               :key="item.id"
               class="flex flex-col gap-2.5 rounded-md border border-line bg-paper p-4 transition-colors hover:bg-paper-2/60"
             >
@@ -968,10 +964,10 @@ async function handleDelete() {
             </li>
           </ul>
 
-          <!-- Pagination Kontrolleri -->
+          <!-- Backend Pagination Kontrolleri -->
           <div class="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-md border border-line bg-paper px-4 py-3">
             <p class="text-xs text-ink-2">
-              Toplam <span class="font-mono font-bold text-ink">{{ logs.length }}</span> kayıttan
+              Toplam <span class="font-mono font-bold text-ink">{{ totalLogs }}</span> kayıttan
               <span class="font-mono font-bold text-ink">{{ logRangeStart }}–{{ logRangeEnd }}</span> arası gösteriliyor
               <span class="text-ink-3">(Sayfa {{ currentLogPage }} / {{ totalLogPages }})</span>
             </p>
@@ -979,7 +975,7 @@ async function handleDelete() {
             <div class="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
-                :disabled="currentLogPage <= 1"
+                :disabled="currentLogPage <= 1 || logsLoading"
                 class="inline-flex items-center gap-1 rounded-sm border border-ink bg-card px-2.5 py-1 text-xs font-semibold text-ink transition-colors hover:bg-paper-2 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
                 @click="goToLogPage(currentLogPage - 1)"
               >
@@ -996,6 +992,7 @@ async function handleDelete() {
                 <button
                   v-else
                   type="button"
+                  :disabled="logsLoading"
                   class="inline-flex h-7 min-w-7 items-center justify-center rounded-sm border px-2 font-mono text-xs font-bold transition-colors cursor-pointer"
                   :class="
                     pageItem === currentLogPage
@@ -1010,7 +1007,7 @@ async function handleDelete() {
 
               <button
                 type="button"
-                :disabled="currentLogPage >= totalLogPages"
+                :disabled="currentLogPage >= totalLogPages || logsLoading"
                 class="inline-flex items-center gap-1 rounded-sm border border-ink bg-card px-2.5 py-1 text-xs font-semibold text-ink transition-colors hover:bg-paper-2 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
                 @click="goToLogPage(currentLogPage + 1)"
               >

@@ -244,6 +244,113 @@ func (q *Queries) ListLinksByUser(ctx context.Context, userID int64) ([]Link, er
 	return items, nil
 }
 
+const listLinksByUserPaginated = `-- name: ListLinksByUserPaginated :many
+SELECT id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+WHERE user_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListLinksByUserPaginatedParams struct {
+	UserID int64 `json:"user_id"`
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+func (q *Queries) ListLinksByUserPaginated(ctx context.Context, arg ListLinksByUserPaginatedParams) ([]Link, error) {
+	rows, err := q.db.Query(ctx, listLinksByUserPaginated, arg.UserID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Link
+	for rows.Next() {
+		var i Link
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Alias,
+			&i.TargetUrl,
+			&i.PasswordHash,
+			&i.Clicks,
+			&i.CreatedAt,
+			&i.WaitEnabled,
+			&i.WaitSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getUserLinkStats = `-- name: GetUserLinkStats :one
+SELECT
+    COUNT(*)::BIGINT AS total_links,
+    COALESCE(SUM(clicks), 0)::BIGINT AS total_clicks,
+    COUNT(*) FILTER (WHERE password_hash IS NOT NULL AND password_hash <> '')::BIGINT AS locked_links
+FROM links
+WHERE user_id = $1
+`
+
+type GetUserLinkStatsRow struct {
+	TotalLinks  int64 `json:"total_links"`
+	TotalClicks int64 `json:"total_clicks"`
+	LockedLinks int64 `json:"locked_links"`
+}
+
+func (q *Queries) GetUserLinkStats(ctx context.Context, userID int64) (GetUserLinkStatsRow, error) {
+	row := q.db.QueryRow(ctx, getUserLinkStats, userID)
+	var i GetUserLinkStatsRow
+	err := row.Scan(&i.TotalLinks, &i.TotalClicks, &i.LockedLinks)
+	return i, err
+}
+
+const listTopLinksByUser = `-- name: ListTopLinksByUser :many
+SELECT id, user_id, alias, target_url, password_hash, clicks, created_at, wait_enabled, wait_seconds FROM links
+WHERE user_id = $1
+ORDER BY clicks DESC, created_at DESC, id DESC
+LIMIT $2
+`
+
+type ListTopLinksByUserParams struct {
+	UserID int64 `json:"user_id"`
+	Limit  int32 `json:"limit"`
+}
+
+func (q *Queries) ListTopLinksByUser(ctx context.Context, arg ListTopLinksByUserParams) ([]Link, error) {
+	rows, err := q.db.Query(ctx, listTopLinksByUser, arg.UserID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Link
+	for rows.Next() {
+		var i Link
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Alias,
+			&i.TargetUrl,
+			&i.PasswordHash,
+			&i.Clicks,
+			&i.CreatedAt,
+			&i.WaitEnabled,
+			&i.WaitSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLogsByLink = `-- name: ListLogsByLink :many
 SELECT id, link_id, ip_address, user_agent, device_type, browser, os, referer, accept_language, clicked_at FROM logs
 WHERE link_id = $1
@@ -252,6 +359,62 @@ ORDER BY clicked_at DESC
 
 func (q *Queries) ListLogsByLink(ctx context.Context, linkID int64) ([]Log, error) {
 	rows, err := q.db.Query(ctx, listLogsByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Log
+	for rows.Next() {
+		var i Log
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.IpAddress,
+			&i.UserAgent,
+			&i.DeviceType,
+			&i.Browser,
+			&i.Os,
+			&i.Referer,
+			&i.AcceptLanguage,
+			&i.ClickedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countLogsByLink = `-- name: CountLogsByLink :one
+SELECT COUNT(*)::BIGINT FROM logs
+WHERE link_id = $1
+`
+
+func (q *Queries) CountLogsByLink(ctx context.Context, linkID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countLogsByLink, linkID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const listLogsByLinkPaginated = `-- name: ListLogsByLinkPaginated :many
+SELECT id, link_id, ip_address, user_agent, device_type, browser, os, referer, accept_language, clicked_at FROM logs
+WHERE link_id = $1
+ORDER BY clicked_at DESC, id DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListLogsByLinkPaginatedParams struct {
+	LinkID int64 `json:"link_id"`
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+func (q *Queries) ListLogsByLinkPaginated(ctx context.Context, arg ListLogsByLinkPaginatedParams) ([]Log, error) {
+	rows, err := q.db.Query(ctx, listLogsByLinkPaginated, arg.LinkID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}

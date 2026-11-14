@@ -139,6 +139,25 @@ func (r *LinkRepository) ListByUser(ctx context.Context, userID int64) ([]db.Lin
 	return r.q.ListLinksByUser(ctx, userID)
 }
 
+func (r *LinkRepository) ListByUserPaginated(ctx context.Context, userID int64, limit, offset int32) ([]db.Link, error) {
+	return r.q.ListLinksByUserPaginated(ctx, db.ListLinksByUserPaginatedParams{
+		UserID: userID,
+		Limit:  limit,
+		Offset: offset,
+	})
+}
+
+func (r *LinkRepository) GetUserStats(ctx context.Context, userID int64) (db.GetUserLinkStatsRow, error) {
+	return r.q.GetUserLinkStats(ctx, userID)
+}
+
+func (r *LinkRepository) ListTopByUser(ctx context.Context, userID int64, limit int32) ([]db.Link, error) {
+	return r.q.ListTopLinksByUser(ctx, db.ListTopLinksByUserParams{
+		UserID: userID,
+		Limit:  limit,
+	})
+}
+
 func (r *LinkRepository) GetByIDAndUser(ctx context.Context, id, userID int64) (db.Link, error) {
 	return r.q.GetLinkByIDAndUser(ctx, db.GetLinkByIDAndUserParams{
 		ID:     id,
@@ -189,4 +208,16 @@ func (r *LinkRepository) Delete(ctx context.Context, id, userID int64) (int64, e
 
 func (r *LinkRepository) ListLogsByLink(ctx context.Context, linkID int64) ([]db.Log, error) {
 	return r.q.ListLogsByLink(ctx, linkID)
+}
+
+func (r *LinkRepository) CountLogsByLink(ctx context.Context, linkID int64) (int64, error) {
+	return r.q.CountLogsByLink(ctx, linkID)
+}
+
+func (r *LinkRepository) ListLogsByLinkPaginated(ctx context.Context, linkID int64, limit, offset int32) ([]db.Log, error) {
+	return r.q.ListLogsByLinkPaginated(ctx, db.ListLogsByLinkPaginatedParams{
+		LinkID: linkID,
+		Limit:  limit,
+		Offset: offset,
+	})
 }

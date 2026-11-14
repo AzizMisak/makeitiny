@@ -311,8 +311,85 @@ func (s *LinkService) CreateLink(ctx context.Context, userID int64, target strin
 	return link, nil
 }
 
-func (s *LinkService) ListLinks(ctx context.Context, userID int64) ([]db.Link, error) {
-	return s.links.ListByUser(ctx, userID)
+type PaginatedLinksResult struct {
+	Items       []db.Link
+	Page        int32
+	Limit       int32
+	Total       int64
+	TotalPages  int32
+	TotalClicks int64
+	LockedCount int64
+	TopLinks    []db.Link
+}
+
+type PaginatedLogsResult struct {
+	Items      []db.Log
+	Page       int32
+	Limit      int32
+	Total      int64
+	TotalPages int32
+}
+
+func normalizePagination(page, limit *int32, defaultLimit, maxLimit int32) (int32, int32) {
+	p := int32(1)
+	if page != nil && *page > 0 {
+		p = *page
+	}
+	l := defaultLimit
+	if limit != nil && *limit > 0 {
+		l = *limit
+		if l > maxLimit {
+			l = maxLimit
+		}
+	}
+	return p, l
+}
+
+func calcTotalPages(total int64, limit int32) int32 {
+	if total <= 0 || limit <= 0 {
+		return 1
+	}
+	pages := (total + int64(limit) - 1) / int64(limit)
+	if pages < 1 {
+		return 1
+	}
+	return int32(pages)
+}
+
+func (s *LinkService) ListLinks(ctx context.Context, userID int64, page, limit *int32) (PaginatedLinksResult, error) {
+	p, l := normalizePagination(page, limit, 10, 100)
+
+	stats, err := s.links.GetUserStats(ctx, userID)
+	if err != nil {
+		return PaginatedLinksResult{}, err
+	}
+
+	totalPages := calcTotalPages(stats.TotalLinks, l)
+	if p > totalPages {
+		p = totalPages
+	}
+	offset := (p - 1) * l
+
+	items, err := s.links.ListByUserPaginated(ctx, userID, l, offset)
+	if err != nil {
+		return PaginatedLinksResult{}, err
+	}
+
+	topLinks, err := s.links.ListTopByUser(ctx, userID, 3)
+	if err != nil {
+		return PaginatedLinksResult{}, err
+	}
+
+	return PaginatedLinksResult{
+		Items:       items,
+		Page:        p,
+		Limit:       l,
+		Total:       stats.TotalLinks,
+		TotalPages:  totalPages,
+		TotalClicks: stats.TotalClicks,
+		LockedCount: stats.LockedLinks,
+		TopLinks:    topLinks,
+	}, nil
 }
 
 func (s *LinkService) CheckAlias(ctx context.Context, alias string) (bool, error) {
@@ -436,12 +513,37 @@ func (s *LinkService) UpdateLink(ctx context.Context, idStr string, userID int64
 	return updated, nil
 }
 
-func (s *LinkService) ListLinkLogs(ctx context.Context, idStr string, userID int64) ([]db.Log, error) {
+func (s *LinkService) ListLinkLogs(ctx context.Context, idStr string, userID int64, page, limit *int32) (PaginatedLogsResult, error) {
 	link, err := s.GetLink(ctx, idStr, userID)
 	if err != nil {
-		return nil, err
+		return PaginatedLogsResult{}, err
 	}
-	return s.links.ListLogsByLink(ctx, link.ID)
+
+	p, l := normalizePagination(page, limit, 20, 100)
+
+	total, err := s.links.CountLogsByLink(ctx, link.ID)
+	if err != nil {
+		return PaginatedLogsResult{}, err
+	}
+
+	totalPages := calcTotalPages(total, l)
+	if p > totalPages {
+		p = totalPages
+	}
+	offset := (p - 1) * l
+
+	items, err := s.links.ListLogsByLinkPaginated(ctx, link.ID, l, offset)
+	if err != nil {
+		return PaginatedLogsResult{}, err
+	}
+
+	return PaginatedLogsResult{
+		Items:      items,
+		Page:       p,
+		Limit:      l,
+		Total:      total,
+		TotalPages: totalPages,
+	}, nil
 }
 
 func (s *LinkService) DeleteLink(ctx context.Context, idStr string, userID int64) error {

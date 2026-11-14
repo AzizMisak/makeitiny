@@ -6,6 +6,7 @@
 package gen
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -134,6 +135,47 @@ type MessageResponse struct {
 	Message string `json:"message"`
 }
 
+// PaginatedLinksResponse defines model for PaginatedLinksResponse.
+type PaginatedLinksResponse struct {
+	Items []LinkItem `json:"items"`
+
+	// Limit Example: 10
+	Limit int32 `json:"limit"`
+
+	// LockedCount Example: 3
+	LockedCount int64 `json:"lockedCount"`
+
+	// Page Example: 1
+	Page     int32      `json:"page"`
+	TopLinks []LinkItem `json:"topLinks"`
+
+	// Total Example: 42
+	Total int64 `json:"total"`
+
+	// TotalClicks Example: 1284
+	TotalClicks int64 `json:"totalClicks"`
+
+	// TotalPages Example: 5
+	TotalPages int32 `json:"totalPages"`
+}
+
+// PaginatedLogsResponse defines model for PaginatedLogsResponse.
+type PaginatedLogsResponse struct {
+	Items []LinkLogItem `json:"items"`
+
+	// Limit Example: 20
+	Limit int32 `json:"limit"`
+
+	// Page Example: 1
+	Page int32 `json:"page"`
+
+	// Total Example: 150
+	Total int64 `json:"total"`
+
+	// TotalPages Example: 8
+	TotalPages int32 `json:"totalPages"`
+}
+
 // RegisterRequest defines model for RegisterRequest.
 type RegisterRequest struct {
 	// Email Example: aziz@makeitiny.com
@@ -187,6 +229,18 @@ type User struct {
 	Name string `json:"name"`
 }
 
+// ListLinksParams defines parameters for ListLinks.
+type ListLinksParams struct {
+	Page  *int32 `form:"page,omitempty" json:"page,omitempty"`
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListLinkLogsParams defines parameters for ListLinkLogs.
+type ListLinkLogsParams struct {
+	Page  *int32 `form:"page,omitempty" json:"page,omitempty"`
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
@@ -225,18 +279,18 @@ type ServerInterface interface {
 	// GetHealth Sağlık kontrolü
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
-	// ListLinks Oturumdaki kullanıcıya ait kısaltılmış linkleri listele
+	// ListLinks Oturumdaki kullanıcıya ait kısaltılmış linkleri sayfalı olarak listele
 	// (GET /links)
-	ListLinks(w http.ResponseWriter, r *http.Request)
+	ListLinks(w http.ResponseWriter, r *http.Request, params ListLinksParams)
 	// CreateLink Yeni kısa link oluştur
 	// (POST /links)
 	CreateLink(w http.ResponseWriter, r *http.Request)
 	// CheckAlias Özel takma ad (custom alias) müsait mi kontrol et
 	// (GET /links/check-alias/{alias})
 	CheckAlias(w http.ResponseWriter, r *http.Request, alias string)
-	// ListLinkLogs Kullanıcıya ait bir linkin tıklama loglarını listele
+	// ListLinkLogs Kullanıcıya ait bir linkin tıklama loglarını sayfalı olarak listele
 	// (GET /links/logs/{id})
-	ListLinkLogs(w http.ResponseWriter, r *http.Request, id string)
+	ListLinkLogs(w http.ResponseWriter, r *http.Request, id string, params ListLinkLogsParams)
 	// DeleteLink Kullanıcıya ait bir linki sil
 	// (DELETE /links/{id})
 	DeleteLink(w http.ResponseWriter, r *http.Request, id string)
@@ -358,8 +412,40 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 // ListLinks operation middleware
 func (siw *ServerInterfaceWrapper) ListLinks(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListLinksParams
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListLinks(w, r)
+		siw.Handler.ListLinks(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -424,8 +510,37 @@ func (siw *ServerInterfaceWrapper) ListLinkLogs(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListLinkLogsParams
+
+	// ------------- Optional query parameter "page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "page", r.URL.Query(), &params.Page, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "page"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "page", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: "int32"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListLinkLogs(w, r, id)
+		siw.Handler.ListLinkLogs(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {

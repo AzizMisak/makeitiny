@@ -269,25 +269,39 @@ func (h *Handler) CreateLink(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, toLinkItem(link))
 }
 
-func (h *Handler) ListLinks(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListLinks(w http.ResponseWriter, r *http.Request, params gen.ListLinksParams) {
 	claims, err := h.authenticate(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Oturum doğrulaması başarısız.")
 		return
 	}
 
-	links, err := h.links.ListLinks(r.Context(), claims.UserID)
+	result, err := h.links.ListLinks(r.Context(), claims.UserID, params.Page, params.Limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Linkler listelenirken bir hata oluştu.")
 		return
 	}
 
-	items := make([]gen.LinkItem, 0, len(links))
-	for _, l := range links {
+	items := make([]gen.LinkItem, 0, len(result.Items))
+	for _, l := range result.Items {
 		items = append(items, toLinkItem(l))
 	}
 
-	writeJSON(w, http.StatusOK, items)
+	topItems := make([]gen.LinkItem, 0, len(result.TopLinks))
+	for _, l := range result.TopLinks {
+		topItems = append(topItems, toLinkItem(l))
+	}
+
+	writeJSON(w, http.StatusOK, gen.PaginatedLinksResponse{
+		Items:       items,
+		Page:        result.Page,
+		Limit:       result.Limit,
+		Total:       result.Total,
+		TotalPages:  result.TotalPages,
+		TotalClicks: result.TotalClicks,
+		LockedCount: result.LockedCount,
+		TopLinks:    topItems,
+	})
 }
 
 func (h *Handler) CheckAlias(w http.ResponseWriter, r *http.Request, alias string) {
@@ -363,14 +377,14 @@ func (h *Handler) UpdateLink(w http.ResponseWriter, r *http.Request, id string) 
 	writeJSON(w, http.StatusOK, toLinkItem(updated))
 }
 
-func (h *Handler) ListLinkLogs(w http.ResponseWriter, r *http.Request, id string) {
+func (h *Handler) ListLinkLogs(w http.ResponseWriter, r *http.Request, id string, params gen.ListLinkLogsParams) {
 	claims, err := h.authenticate(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Oturum doğrulaması başarısız.")
 		return
 	}
 
-	logs, err := h.links.ListLinkLogs(r.Context(), id, claims.UserID)
+	result, err := h.links.ListLinkLogs(r.Context(), id, claims.UserID, params.Page, params.Limit)
 	if err != nil {
 		if errors.Is(err, service.ErrLinkNotFound) {
 			writeError(w, http.StatusNotFound, "link_not_found", err.Error())
@@ -380,12 +394,18 @@ func (h *Handler) ListLinkLogs(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 
-	items := make([]gen.LinkLogItem, 0, len(logs))
-	for _, lg := range logs {
+	items := make([]gen.LinkLogItem, 0, len(result.Items))
+	for _, lg := range result.Items {
 		items = append(items, toLinkLogItem(lg))
 	}
 
-	writeJSON(w, http.StatusOK, items)
+	writeJSON(w, http.StatusOK, gen.PaginatedLogsResponse{
+		Items:      items,
+		Page:       result.Page,
+		Limit:      result.Limit,
+		Total:      result.Total,
+		TotalPages: result.TotalPages,
+	})
 }
 
 func (h *Handler) DeleteLink(w http.ResponseWriter, r *http.Request, id string) {

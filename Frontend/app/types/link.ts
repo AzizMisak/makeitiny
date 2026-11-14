@@ -22,6 +22,25 @@ export interface LinkLogItem {
   clickedAt: string
 }
 
+export interface PaginatedLinksResponse {
+  items: LinkItem[]
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+  totalClicks: number
+  lockedCount: number
+  topLinks: LinkItem[]
+}
+
+export interface PaginatedLogsResponse {
+  items: LinkLogItem[]
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+}
+
 /** POST /links gövdesi. */
 export interface CreateLinkPayload {
   target: string

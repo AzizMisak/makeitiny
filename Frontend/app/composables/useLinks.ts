@@ -1,4 +1,10 @@
-import type { CreateLinkPayload, LinkItem, LinkLogItem, UpdateLinkPayload } from '~/types/link'
+import type {
+  CreateLinkPayload,
+  LinkItem,
+  PaginatedLinksResponse,
+  PaginatedLogsResponse,
+  UpdateLinkPayload
+} from '~/types/link'
 
 export function normalizeTargetUrl(raw: string): string {
   const trimmed = raw.trim()
@@ -11,15 +17,28 @@ export function normalizeTargetUrl(raw: string): string {
 
 export function useLinks() {
   const links = useState<LinkItem[]>('links', () => [])
+  const topLinks = useState<LinkItem[]>('links_top', () => [])
+  const currentPage = useState<number>('links_page', () => 1)
+  const pageSize = useState<number>('links_limit', () => 10)
+  const totalLinks = useState<number>('links_total', () => 0)
+  const totalPages = useState<number>('links_total_pages', () => 1)
+  const totalClicks = useState<number>('links_total_clicks', () => 0)
+  const lockedCount = useState<number>('links_locked_count', () => 0)
   const loading = useState<boolean>('links_loading', () => false)
   const initialized = useState<boolean>('links_initialized', () => false)
 
-  const totalClicks = computed(() => links.value.reduce((sum, l) => sum + l.clicks, 0))
-
-  async function fetchLinks() {
+  async function fetchLinks(page = currentPage.value, limit = pageSize.value) {
     loading.value = true
     try {
-      links.value = await useApi().get<LinkItem[]>('/links')
+      const res = await useApi().get<PaginatedLinksResponse>(`/links?page=${page}&limit=${limit}`)
+      links.value = res.items ?? []
+      topLinks.value = res.topLinks ?? []
+      currentPage.value = res.page ?? 1
+      pageSize.value = res.limit ?? limit
+      totalLinks.value = res.total ?? 0
+      totalPages.value = res.totalPages ?? 1
+      totalClicks.value = res.totalClicks ?? 0
+      lockedCount.value = res.lockedCount ?? 0
     } finally {
       loading.value = false
       initialized.value = true
@@ -35,8 +54,8 @@ export function useLinks() {
     return item
   }
 
-  async function getLinkLogs(id: string): Promise<LinkLogItem[]> {
-    return await useApi().get<LinkLogItem[]>(`/links/logs/${id}`)
+  async function getLinkLogs(id: string, page = 1, limit = 20): Promise<PaginatedLogsResponse> {
+    return await useApi().get<PaginatedLogsResponse>(`/links/logs/${id}?page=${page}&limit=${limit}`)
   }
 
   async function addLink(input: CreateLinkPayload) {
@@ -45,7 +64,7 @@ export function useLinks() {
       target: normalizeTargetUrl(input.target)
     }
     const created = await useApi().post<LinkItem, CreateLinkPayload>('/links', payload)
-    links.value = [created, ...links.value]
+    await fetchLinks(1, pageSize.value)
     return created
   }
 
@@ -56,25 +75,38 @@ export function useLinks() {
     }
     const updated = await useApi().patch<LinkItem, UpdateLinkPayload>(`/links/${id}`, payload)
     links.value = links.value.map((l) => (l.id === id ? updated : l))
+    topLinks.value = topLinks.value.map((l) => (l.id === id ? updated : l))
     return updated
   }
 
   async function removeLink(id: string) {
     await useApi().del(`/links/${id}`)
-    links.value = links.value.filter((l) => l.id !== id)
+    await fetchLinks(currentPage.value, pageSize.value)
   }
 
   function resetLinks() {
     links.value = []
+    topLinks.value = []
+    currentPage.value = 1
+    totalLinks.value = 0
+    totalPages.value = 1
+    totalClicks.value = 0
+    lockedCount.value = 0
     initialized.value = false
     loading.value = false
   }
 
   return {
     links,
+    topLinks,
+    currentPage,
+    pageSize,
+    totalLinks,
+    totalPages,
+    totalClicks,
+    lockedCount,
     loading,
     initialized,
-    totalClicks,
     fetchLinks,
     getLink,
     getLinkLogs,

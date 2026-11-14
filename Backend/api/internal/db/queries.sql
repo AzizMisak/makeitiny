@@ -32,6 +32,26 @@ SELECT * FROM links
 WHERE user_id = $1
 ORDER BY created_at DESC;
 
+-- name: ListLinksByUserPaginated :many
+SELECT * FROM links
+WHERE user_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2 OFFSET $3;
+
+-- name: GetUserLinkStats :one
+SELECT
+    COUNT(*)::BIGINT AS total_links,
+    COALESCE(SUM(clicks), 0)::BIGINT AS total_clicks,
+    COUNT(*) FILTER (WHERE password_hash IS NOT NULL AND password_hash <> '')::BIGINT AS locked_links
+FROM links
+WHERE user_id = $1;
+
+-- name: ListTopLinksByUser :many
+SELECT * FROM links
+WHERE user_id = $1
+ORDER BY clicks DESC, created_at DESC, id DESC
+LIMIT $2;
+
 -- name: GetLinkByIDAndUser :one
 SELECT * FROM links
 WHERE id = $1 AND user_id = $2
@@ -65,3 +85,13 @@ WHERE id = $1 AND user_id = $2;
 SELECT * FROM logs
 WHERE link_id = $1
 ORDER BY clicked_at DESC;
+
+-- name: CountLogsByLink :one
+SELECT COUNT(*)::BIGINT FROM logs
+WHERE link_id = $1;
+
+-- name: ListLogsByLinkPaginated :many
+SELECT * FROM logs
+WHERE link_id = $1
+ORDER BY clicked_at DESC, id DESC
+LIMIT $2 OFFSET $3;

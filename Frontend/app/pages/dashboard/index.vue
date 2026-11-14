@@ -2,12 +2,11 @@
 definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 useHead({ title: 'Genel bakış — makeiTiny' })
 
-const { links, loading, initialized, totalClicks, fetchLinks, removeLink } = useLinks()
+const { topLinks, totalLinks, totalClicks, lockedCount, loading, initialized, fetchLinks, removeLink } = useLinks()
 const isLoading = computed(() => loading.value || !initialized.value)
-const top = computed(() => [...links.value].sort((a, b) => b.clicks - a.clicks).slice(0, 3))
 
 onMounted(() => {
-  fetchLinks()
+  fetchLinks(1, 10)
 })
 </script>
 
@@ -19,11 +18,11 @@ onMounted(() => {
   </DashboardPageHeader>
 
   <div class="grid gap-5 sm:grid-cols-3">
-    <DashboardStatTile label="Toplam link" :value="isLoading ? '...' : links.length" />
+    <DashboardStatTile label="Toplam link" :value="isLoading ? '...' : totalLinks.toLocaleString('tr-TR')" />
     <DashboardStatTile label="Toplam tıklama" :value="isLoading ? '...' : totalClicks.toLocaleString('tr-TR')" />
-    <DashboardStatTile label="Şifreli link" :value="isLoading ? '...' : links.filter((l) => l.locked).length" />
+    <DashboardStatTile label="Şifreli link" :value="isLoading ? '...' : lockedCount.toLocaleString('tr-TR')" />
   </div>
 
   <h2 class="mb-4 mt-12 text-2xl font-bold">En çok tıklananlar</h2>
-  <DashboardLinkList :links="top" :loading="isLoading" @remove="removeLink" />
+  <DashboardLinkList :links="topLinks" :loading="isLoading" @remove="removeLink" />
 </template>
