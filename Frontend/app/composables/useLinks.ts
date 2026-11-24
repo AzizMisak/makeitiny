@@ -1,4 +1,5 @@
 import type {
+  AliasCheckResult,
   CreateLinkPayload,
   LinkItem,
   PaginatedLinksResponse,
@@ -58,13 +59,20 @@ export function useLinks() {
     return await useApi().get<PaginatedLogsResponse>(`/links/logs/${id}?page=${page}&limit=${limit}`)
   }
 
+  async function checkAlias(alias: string): Promise<AliasCheckResult> {
+    return await useApi().get<AliasCheckResult>(`/links/check-alias/${encodeURIComponent(alias.trim())}`)
+  }
+
   async function addLink(input: CreateLinkPayload) {
     const payload: CreateLinkPayload = {
       ...input,
       target: normalizeTargetUrl(input.target)
     }
     const created = await useApi().post<LinkItem, CreateLinkPayload>('/links', payload)
-    await fetchLinks(1, pageSize.value)
+    await Promise.all([
+      fetchLinks(1, pageSize.value),
+      useAuth().fetchCurrentUser().catch(() => {})
+    ])
     return created
   }
 
@@ -81,7 +89,10 @@ export function useLinks() {
 
   async function removeLink(id: string) {
     await useApi().del(`/links/${id}`)
-    await fetchLinks(currentPage.value, pageSize.value)
+    await Promise.all([
+      fetchLinks(currentPage.value, pageSize.value),
+      useAuth().fetchCurrentUser().catch(() => {})
+    ])
   }
 
   function resetLinks() {
@@ -110,6 +121,7 @@ export function useLinks() {
     fetchLinks,
     getLink,
     getLinkLogs,
+    checkAlias,
     addLink,
     updateLink,
     removeLink,

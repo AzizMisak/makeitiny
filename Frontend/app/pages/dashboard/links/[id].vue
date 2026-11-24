@@ -5,7 +5,8 @@ definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 
 const route = useRoute()
 const { public: config } = useRuntimeConfig()
-const { getLink, getLinkLogs, updateLink, removeLink } = useLinks()
+const { user, isAdmin, canUseFeature } = useAuth()
+const { getLink, getLinkLogs, updateLink, removeLink, checkAlias } = useLinks()
 
 const id = computed(() => String(route.params.id ?? ''))
 const link = ref<LinkItem | null>(null)
@@ -16,17 +17,31 @@ const pageLoading = ref(true)
 const pageError = ref('')
 
 const editTarget = ref('')
+const editTitle = ref('')
 const editAlias = ref('')
 const newPassword = ref('')
 const removePasswordFlag = ref(false)
 const editWaitEnabled = ref(false)
 const editWaitSeconds = ref('5')
+const editIsActive = ref(true)
+const editExpiresAt = ref('')
+const editMaxClicks = ref('')
+const editAdEnabled = ref(false)
 
 const saving = ref(false)
 const saveSuccess = ref(false)
 const saveError = ref('')
 const copied = ref(false)
 const confirmDelete = ref(false)
+const aliasChecking = ref(false)
+const aliasCheckMsg = ref<{ available: boolean; text: string } | null>(null)
+
+const canCustomAlias = computed(() => canUseFeature('allowCustomAlias'))
+const canPassword = computed(() => canUseFeature('allowPassword'))
+const canAds = computed(() => canUseFeature('allowAds'))
+const analyticsLimitLabel = computed(() =>
+  isAdmin.value ? 'Tam Arşiv (Sınırsız)' : `Son ${user.value?.plan?.analyticsDays ?? 7} Gün`
+)
 
 // Backend Pagination (Sayfa başına 20 log kaydı)
 const LOGS_PER_PAGE = 20
@@ -293,6 +308,10 @@ const osDistribution = computed<DistributionItem[]>(() =>
 const countryDistribution = computed<DistributionItem[]>(() =>
   buildDistribution(
     logs.value.map((l) => {
+      if (l.countryCode && l.countryCode.length === 2) {
+        const known = COUNTRY_NAMES_TR[l.countryCode]
+        return { label: known?.name ?? `Ülke (${l.countryCode})`, code: l.countryCode }
+      }
       const resolved = resolveCountryFromLanguage(l.acceptLanguage)
       return { label: resolved.name, code: resolved.code }
     })
@@ -570,6 +589,60 @@ const accessModeLabel = computed(() => {
   return 'Herkese Açık'
 })
 
+const linkStatusLabel = computed(() => {
+  if (!link.value) return ''
+  if (link.value.securityStatus === 'blocked' || link.value.securityStatus === 'malicious') return 'Güvenlik Engelli'
+  if (!link.value.isActive) return 'Pasif'
+  return 'Aktif'
+})
+
+const linkStatusNote = computed(() => {
+  if (!link.value) return undefined
+  if (link.value.maxClicks) return `Limit: ${link.value.clicks} / ${link.value.maxClicks}`
+  return `Güvenlik: ${link.value.securityStatus}`
+})
+
+const expiryNote = computed(() => {
+  if (!link.value) return undefined
+  return link.value.expiresAt ? `Bitiş: ${link.value.expiresAt}` : 'Süresiz'
+})
+
+watch(editAlias, () => {
+  aliasCheckMsg.value = null
+})
+
+function syncFormFromLink(data: LinkItem) {
+  link.value = data
+  editTarget.value = data.target
+  editTitle.value = data.title ?? ''
+  editAlias.value = data.alias
+  newPassword.value = ''
+  removePasswordFlag.value = false
+  editWaitEnabled.value = !data.locked && data.waitEnabled
+  editWaitSeconds.value = String(data.waitSeconds > 0 ? data.waitSeconds : 5)
+  editIsActive.value = data.isActive
+  editExpiresAt.value = data.expiresAt ?? ''
+  editMaxClicks.value = data.maxClicks ? String(data.maxClicks) : ''
+  editAdEnabled.value = data.adEnabled
+}
+
+async function handleCheckAlias() {
+  const val = editAlias.value.trim()
+  if (!val) return
+  aliasChecking.value = true
+  try {
+    const res = await checkAlias(val)
+    aliasCheckMsg.value = {
+      available: res.available,
+      text: res.available ? `'${res.alias}' müsait.` : `'${res.alias}' kullanımda.`
+    }
+  } catch (e: any) {
+    aliasCheckMsg.value = { available: false, text: e?.message ?? 'Kontrol edilemedi.' }
+  } finally {
+    aliasChecking.value = false
+  }
+}
+
 async function loadLogs(page = currentLogPage.value) {
   logsLoading.value = true
   logsError.value = ''
@@ -591,13 +664,7 @@ async function loadLink() {
   pageError.value = ''
   try {
     const data = await getLink(id.value)
-    link.value = data
-    editTarget.value = data.target
-    editAlias.value = data.alias
-    newPassword.value = ''
-    removePasswordFlag.value = false
-    editWaitEnabled.value = !data.locked && data.waitEnabled
-    editWaitSeconds.value = String(data.waitSeconds > 0 ? data.waitSeconds : 5)
+    syncFormFromLink(data)
     await loadLogs()
   } catch (e: any) {
     pageError.value = e?.message ?? 'Link bilgileri yüklenemedi.'
@@ -642,22 +709,32 @@ async function handleSave() {
     return
   }
 
+  let parsedMaxClicks = 0
+  const rawMaxClicks = String(editMaxClicks.value ?? '').trim()
+  if (rawMaxClicks !== '') {
+    const mc = Number.parseInt(rawMaxClicks, 10)
+    if (!Number.isFinite(mc) || mc < 1) {
+      saveError.value = 'Maksimum tıklama sınırı pozitif bir sayı olmalıdır.'
+      return
+    }
+    parsedMaxClicks = mc
+  }
+
   saving.value = true
   try {
     const updated = await updateLink(link.value.id, {
       target: editTarget.value,
-      alias: editAlias.value.trim(),
+      title: editTitle.value.trim(),
+      alias: canCustomAlias.value || editAlias.value.trim() === link.value.alias ? editAlias.value.trim() : undefined,
       password: passwordPayload,
       waitEnabled: finalWaitEnabled,
-      waitSeconds: finalWaitEnabled ? parsedSeconds : 0
+      waitSeconds: finalWaitEnabled ? parsedSeconds : 0,
+      isActive: editIsActive.value,
+      expiresAt: editExpiresAt.value.trim(),
+      maxClicks: parsedMaxClicks,
+      adEnabled: canAds.value ? editAdEnabled.value : link.value.adEnabled
     })
-    link.value = updated
-    editTarget.value = updated.target
-    editAlias.value = updated.alias
-    newPassword.value = ''
-    removePasswordFlag.value = false
-    editWaitEnabled.value = !updated.locked && updated.waitEnabled
-    editWaitSeconds.value = String(updated.waitSeconds > 0 ? updated.waitSeconds : 5)
+    syncFormFromLink(updated)
     saveSuccess.value = true
     setTimeout(() => (saveSuccess.value = false), 2500)
   } catch (e: any) {
@@ -721,10 +798,17 @@ async function handleDelete() {
 
     <template v-else-if="link">
       <DashboardPageHeader
-        :title="`/${link.alias}`"
+        :title="link.title ? `${link.title} (/${link.alias})` : `/${link.alias}`"
         :description="link.target"
       >
         <template #actions>
+          <UiButton
+            v-if="isAdmin"
+            :to="`/dashboard/admin/links/${link.id}`"
+            variant="secondary"
+          >
+            <UiIcon name="shield" :size="15" /> Yönetici incelemesi
+          </UiButton>
           <UiButton variant="secondary" @click="copyShortUrl">
             <UiIcon :name="copied ? 'check' : 'copy'" :size="16" />
             {{ copied ? 'Kopyalandı' : 'Kısa Linki Kopyala' }}
@@ -740,10 +824,22 @@ async function handleDelete() {
         </template>
       </DashboardPageHeader>
 
-      <div class="grid gap-5 sm:grid-cols-3">
+      <div class="mb-6 flex flex-wrap items-center gap-2">
+        <UiBadge tone="neutral">ID: {{ link.id }}</UiBadge>
+        <UiBadge :tone="link.isActive ? 'ok' : 'accent'">
+          {{ link.isActive ? 'Aktif' : 'Pasif' }}
+        </UiBadge>
+        <UiBadge :tone="link.securityStatus === 'blocked' || link.securityStatus === 'malicious' ? 'accent' : 'neutral'">
+          Güvenlik: {{ link.securityStatus }}
+        </UiBadge>
+        <UiBadge v-if="link.adEnabled" tone="neutral">Reklam Açık</UiBadge>
+      </div>
+
+      <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         <DashboardStatTile label="Toplam tıklama" :value="link.clicks.toLocaleString('tr-TR')" />
         <DashboardStatTile label="Erişim durumu" :value="accessModeLabel" />
-        <DashboardStatTile label="Oluşturulma tarihi" :value="link.createdAt" />
+        <DashboardStatTile label="Link durumu" :value="linkStatusLabel" :note="linkStatusNote" />
+        <DashboardStatTile label="Oluşturulma" :value="link.createdAt" :note="expiryNote" />
       </div>
 
       <div class="mt-8 grid gap-8 lg:grid-cols-[1.4fr_1fr]">
@@ -759,22 +855,96 @@ async function handleDelete() {
             {{ saveError }}
           </p>
 
-          <UiField
-            id="detail-target"
-            v-model="editTarget"
-            label="Hedef adres"
-            type="text"
-            placeholder="ornek.com/sayfa veya https://..."
-            hint="Başında http:// veya https:// yoksa otomatik olarak https:// eklenir."
-          />
+          <div class="grid gap-4 sm:grid-cols-2">
+            <UiField
+              id="detail-target"
+              v-model="editTarget"
+              label="Hedef adres"
+              type="text"
+              placeholder="ornek.com/sayfa veya https://..."
+              hint="Başında http:// veya https:// yoksa otomatik olarak https:// eklenir."
+            />
+            <UiField
+              id="detail-title"
+              v-model="editTitle"
+              label="Başlık"
+              type="text"
+              placeholder="İsteğe bağlı"
+            />
+          </div>
 
-          <UiField
-            id="detail-alias"
-            v-model="editAlias"
-            label="Takma ad (Alias)"
-            prefix="localhost/r/"
-            placeholder="kampanya"
-          />
+          <div class="flex flex-col gap-2">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div class="flex-1">
+                <UiField
+                  id="detail-alias"
+                  v-model="editAlias"
+                  label="Takma ad (Alias)"
+                  prefix="localhost/r/"
+                  placeholder="kampanya"
+                  :disabled="!canCustomAlias"
+                />
+              </div>
+              <UiButton v-if="canCustomAlias" type="button" variant="secondary" @click="handleCheckAlias">
+                <UiIcon name="search" :size="15" /> {{ aliasChecking ? 'Kontrol...' : 'Müsait mi?' }}
+              </UiButton>
+            </div>
+            <p
+              v-if="aliasCheckMsg"
+              class="font-mono text-xs font-semibold"
+              :class="aliasCheckMsg.available ? 'text-ok' : 'text-accent-dark'"
+            >
+              {{ aliasCheckMsg.text }}
+            </p>
+          </div>
+
+          <div class="rounded-md border border-line bg-paper p-4">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <p class="text-sm font-semibold">Link Durumu (Aktif / Pasif)</p>
+                <p class="mt-0.5 text-xs text-ink-3">Pasife alırsanız ziyaretçiler yönlendirilmez ve hata sayfasını görür.</p>
+              </div>
+              <label class="inline-flex shrink-0 cursor-pointer items-center gap-2 select-none">
+                <input v-model="editIsActive" type="checkbox" class="h-4 w-4 accent-accent" />
+                <span class="text-xs font-semibold">{{ editIsActive ? 'Aktif' : 'Pasif' }}</span>
+              </label>
+            </div>
+
+            <div class="mt-4 grid gap-4 border-t border-line pt-4 sm:grid-cols-2">
+              <UiField
+                id="detail-expires-at"
+                v-model="editExpiresAt"
+                label="Son Kullanma Tarihi"
+                type="date"
+                hint="Temizlerseniz süresiz hale gelir."
+              />
+              <UiField
+                id="detail-max-clicks"
+                v-model="editMaxClicks"
+                label="Maksimum Tıklama Limiti"
+                type="number"
+                placeholder="Sınırsız için boş bırakın"
+                hint="Boş bırakılırsa tıklama sınırı kaldırılır."
+              />
+            </div>
+
+            <div class="mt-4 flex items-center justify-between gap-3 border-t border-line pt-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <p class="text-sm font-semibold">Reklam / Gelir Gösterimi</p>
+                  <UiBadge v-if="!canAds" tone="accent">Pro Özelliği</UiBadge>
+                </div>
+                <p class="text-xs text-ink-3">Ara sayfada reklam gösterim modunu açar veya kapatır.</p>
+              </div>
+              <label
+                class="inline-flex shrink-0 cursor-pointer items-center gap-2 select-none"
+                :class="{ 'cursor-not-allowed opacity-50': !canAds }"
+              >
+                <input v-model="editAdEnabled" type="checkbox" :disabled="!canAds" class="h-4 w-4 accent-accent" />
+                <span class="text-xs font-semibold">{{ editAdEnabled ? 'Açık' : 'Kapalı' }}</span>
+              </label>
+            </div>
+          </div>
 
           <div class="rounded-md border border-line bg-paper p-4">
             <div class="flex flex-wrap items-center justify-between gap-2">
@@ -900,6 +1070,7 @@ async function handleDelete() {
           <div>
             <div class="flex flex-wrap items-center gap-2.5">
               <h2 class="text-xl font-bold">Tıklama Logları</h2>
+              <UiBadge tone="ok">{{ analyticsLimitLabel }}</UiBadge>
               <UiBadge v-if="totalLogs > 0" tone="neutral">
                 Toplam {{ totalLogs }} kayıt • Sayfa başına {{ LOGS_PER_PAGE }}
               </UiBadge>

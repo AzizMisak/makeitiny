@@ -2,11 +2,14 @@
 definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 useHead({ title: 'Linklerim — makeiTiny' })
 
+const { user, isAdmin, remainingLinks } = useAuth()
 const {
   links,
   currentPage,
   pageSize,
   totalLinks,
+  totalClicks,
+  lockedCount,
   totalPages,
   loading,
   initialized,
@@ -15,6 +18,11 @@ const {
 } = useLinks()
 
 const isLoading = computed(() => loading.value || !initialized.value)
+
+const quotaValue = computed(() => {
+  if (isAdmin.value || (user.value?.plan?.maxLinks ?? 50) < 0) return 'Sınırsız'
+  return `${remainingLinks.value ?? 0} kalan`
+})
 
 const rangeStart = computed(() => (totalLinks.value === 0 ? 0 : (currentPage.value - 1) * pageSize.value + 1))
 const rangeEnd = computed(() => Math.min(currentPage.value * pageSize.value, totalLinks.value))
@@ -53,6 +61,13 @@ onMounted(() => {
       <UiButton to="/dashboard/new"><UiIcon name="plus" :size="16" /> Yeni link</UiButton>
     </template>
   </DashboardPageHeader>
+
+  <div class="mb-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+    <DashboardStatTile label="Toplam link" :value="isLoading ? '...' : totalLinks.toLocaleString('tr-TR')" />
+    <DashboardStatTile label="Toplam tıklama" :value="isLoading ? '...' : totalClicks.toLocaleString('tr-TR')" />
+    <DashboardStatTile label="Şifreli link" :value="isLoading ? '...' : lockedCount.toLocaleString('tr-TR')" />
+    <DashboardStatTile label="Kalan Kota" :value="quotaValue" :note="user?.plan?.name ?? 'Ücretsiz Paket'" />
+  </div>
 
   <DashboardLinkList :links="links" :loading="isLoading" @remove="removeLink" />
 

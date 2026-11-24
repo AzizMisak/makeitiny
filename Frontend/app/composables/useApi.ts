@@ -1,6 +1,6 @@
 import type { ApiError } from '~/types/api'
 
-type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE'
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 interface RequestOptions<TBody> {
   body?: TBody
@@ -45,6 +45,7 @@ export function useApi() {
   return {
     get: <T>(path: string, query?: RequestOptions<never>['query']) => request<T>('GET', path, { query }),
     post: <T, B = unknown>(path: string, body?: B) => request<T, B>('POST', path, { body }),
+    put: <T, B = unknown>(path: string, body?: B) => request<T, B>('PUT', path, { body }),
     patch: <T, B = unknown>(path: string, body?: B) => request<T, B>('PATCH', path, { body }),
     del: <T = void>(path: string) => request<T>('DELETE', path)
   }

@@ -82,3 +82,8 @@ Bu doküman, MakeItTiny projesinde gerçekleştirilen altyapı, mimari ve geliş
   - Minimum karakterin altında şifre girildiğinde dönen yanıltıcı hata mesajı düzeltilerek `password_too_short` (`"parola en az 4 karakter olmalıdır"`) hatası ayrıştırıldı.
 - **Ana Sayfa Oturum Kontrolleri (`LandingHero.vue`, `LandingCta.vue`, `auth/login.vue`, `auth/register.vue`):**
   - Kullanıcı giriş yapmış durumdayken ana sayfadaki "Giriş yap" ve "Ücretsiz hesap aç / başla" butonları gizlenerek yerine **"Panele git"** ve **"Yeni link kısalt"** butonları eklendi.
+
+---
+
+## 8. Yapay Zeka Asistanı Rehberi (`agents.md`)
+- Kök dizine projenin amacını, mimari yapısını, yönlendirme/port kurallarını, teknik standartlarını (`sqlc`, `goose`, `Redis Hash`, `Argon2id`, `Base62`) ve kesin çalışma/iletişim kurallarını (istenmeyen iş yapmama, belirsizlikleri tartışma, commit atmama, tur sonu özeti verme) içeren `agents.md` dosyası eklendi.

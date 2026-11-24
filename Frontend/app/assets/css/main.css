@@ -26,10 +26,20 @@
   html {
     scroll-behavior: smooth;
     scroll-padding-top: 5rem;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
   }
 
   body {
     @apply bg-paper font-sans text-ink antialiased;
+    overflow-x: hidden;
   }
 
   h1,

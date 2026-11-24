@@ -9,6 +9,7 @@ const { public: config } = useRuntimeConfig()
 const copied = ref(false)
 const fullShortUrl = computed(() => `${config.routerBase}/${props.link.alias}`)
 const displayShortUrl = computed(() => fullShortUrl.value.replace(/^https?:\/\//, ''))
+const isBlocked = computed(() => props.link.securityStatus === 'blocked' || props.link.securityStatus === 'malicious')
 
 async function copy() {
   await navigator.clipboard?.writeText(fullShortUrl.value)
@@ -21,12 +22,20 @@ async function copy() {
   <li class="border-b border-line transition-colors last:border-b-0 hover:bg-paper/60">
     <div class="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
       <NuxtLink :to="`/dashboard/links/${link.id}`" class="group min-w-0 flex-1">
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <span class="font-mono text-sm font-semibold group-hover:text-accent group-hover:underline">
             {{ displayShortUrl }}
           </span>
+          <span v-if="link.title" class="truncate text-xs font-semibold text-ink-2">
+            • {{ link.title }}
+          </span>
+          <UiBadge v-if="isBlocked" tone="accent"><UiIcon name="ban" :size="11" /> engelli</UiBadge>
+          <UiBadge v-else-if="!link.isActive" tone="accent">pasif</UiBadge>
           <UiBadge v-if="link.locked" tone="accent"><UiIcon name="lock" :size="11" /> şifreli</UiBadge>
-          <UiBadge v-else-if="link.waitEnabled" tone="neutral"><UiIcon name="clock" :size="11" /> {{ link.waitSeconds }} sn bekletmeli</UiBadge>
+          <UiBadge v-else-if="link.waitEnabled" tone="neutral"><UiIcon name="clock" :size="11" /> {{ link.waitSeconds }} sn</UiBadge>
+          <UiBadge v-if="link.adEnabled" tone="neutral">reklamlı</UiBadge>
+          <UiBadge v-if="link.expiresAt" tone="neutral">bitiş: {{ link.expiresAt }}</UiBadge>
+          <UiBadge v-if="link.maxClicks" tone="neutral">{{ link.clicks }}/{{ link.maxClicks }} limit</UiBadge>
         </div>
         <p class="mt-1 truncate text-sm text-ink-3" :title="link.target">{{ link.target }}</p>
       </NuxtLink>

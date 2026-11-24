@@ -24,5 +24,7 @@ watch(() => route.path, () => (menuOpen.value = false))
         <slot />
       </main>
     </div>
+
+    <UiToastContainer />
   </div>
 </template>

@@ -1,12 +1,28 @@
+import type { RoleName, User } from './auth'
+
+export type SecurityStatus = 'unchecked' | 'safe' | 'suspicious' | 'malicious' | 'blocked' | string
+
 export interface LinkItem {
   id: string
   alias: string
   target: string
+  title: string
   clicks: number
   locked: boolean
   waitEnabled: boolean
   waitSeconds: number
+  isActive: boolean
+  expiresAt?: string
+  maxClicks?: number
+  adEnabled: boolean
+  securityStatus: SecurityStatus
   createdAt: string
+}
+
+export interface AdminLinkItem extends LinkItem {
+  userId: string
+  userEmail: string
+  userName: string
 }
 
 export interface LinkLogItem {
@@ -19,6 +35,7 @@ export interface LinkLogItem {
   os: string
   referer: string
   acceptLanguage: string
+  countryCode: string
   clickedAt: string
 }
 
@@ -45,13 +62,19 @@ export interface PaginatedLogsResponse {
 export interface CreateLinkPayload {
   target: string
   alias?: string
+  title?: string
   password?: string
   waitEnabled?: boolean
   waitSeconds?: number
+  expiresAt?: string
+  maxClicks?: number
+  adEnabled?: boolean
 }
 
 /** PATCH /links/:id gövdesi. Tüm alanlar isteğe bağlı. */
-export type UpdateLinkPayload = Partial<CreateLinkPayload>
+export interface UpdateLinkPayload extends Partial<CreateLinkPayload> {
+  isActive?: boolean
+}
 
 /** GET /links/check-alias/:alias yanıtı. */
 export interface AliasCheckResult {
@@ -66,4 +89,55 @@ export interface LinkPreview {
   locked: boolean
   waitEnabled: boolean
   waitSeconds: number
+}
+
+/** Admin / Owner API tipleri */
+export interface AdminStatsResponse {
+  totalUsers: number
+  activeUsers: number
+  totalLinks: number
+  activeLinks: number
+  blockedLinks: number
+  totalClicks: number
+}
+
+export interface AdminPaginatedLinksResponse {
+  items: AdminLinkItem[]
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+}
+
+export interface AdminUpdateLinkPayload extends UpdateLinkPayload {
+  securityStatus?: SecurityStatus
+}
+
+export interface AdminPaginatedUsersResponse {
+  items: User[]
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+}
+
+export interface AdminUpdateUserPayload {
+  isActive?: boolean
+  planId?: number
+  planExpiresAt?: string
+}
+
+export interface AdminUpdateRolePayload {
+  role: Extract<RoleName, 'user' | 'admin'>
+}
+
+export interface AdminUpdatePlanPayload {
+  name?: string
+  priceMonthly?: number
+  maxLinks?: number
+  allowCustomAlias?: boolean
+  allowPassword?: boolean
+  allowQr?: boolean
+  allowAds?: boolean
+  analyticsDays?: number
 }

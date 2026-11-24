@@ -1,8 +1,29 @@
-/** Backend'deki kullanıcı. GET /auth/user yanıtı. */
+export type RoleName = 'user' | 'admin' | 'owner'
+
+export interface PlanItem {
+  id: number
+  slug: string
+  name: string
+  priceMonthly: number
+  maxLinks: number
+  allowCustomAlias: boolean
+  allowPassword: boolean
+  allowQr: boolean
+  allowAds: boolean
+  analyticsDays: number
+}
+
+/** Backend'deki kullanıcı. GET /auth/user, POST /auth/login ve POST /auth/register yanıtları. */
 export interface User {
   id: string
   name: string
   email: string
+  isActive: boolean
+  roles: RoleName[]
+  plan: PlanItem
+  planExpiresAt?: string
+  linkCount: number
+  createdAt: string
 }
 
 /** POST /auth/login ve POST /auth/register yanıtı. */

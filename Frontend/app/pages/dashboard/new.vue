@@ -4,6 +4,9 @@ useHead({ title: 'Yeni link — makeiTiny' })
 </script>
 
 <template>
-  <DashboardPageHeader title="Yeni link" description="Uzun bir adresi kısalt." />
+  <DashboardPageHeader
+    title="Yeni link"
+    description="Kısaltmak istediğin adresi ve isteğe bağlı link ayarlarını gir."
+  />
   <DashboardCreateLinkForm />
 </template>
