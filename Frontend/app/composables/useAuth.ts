@@ -71,6 +71,19 @@ export function useAuth() {
     return fresh
   }
 
+  async function refreshSession(): Promise<boolean> {
+    try {
+      const res = await useApi().post<AuthResponse>('/auth/refresh')
+      token.value = res.token
+      user.value = res.user
+      return true
+    } catch {
+      token.value = null
+      user.value = null
+      return false
+    }
+  }
+
   async function login(payload: LoginPayload) {
     const res = await useApi().post<AuthResponse, LoginPayload>('/auth/login', payload)
     token.value = res.token
@@ -116,6 +129,7 @@ export function useAuth() {
     hasAnyRole,
     canUseFeature,
     fetchCurrentUser,
+    refreshSession,
     login,
     register,
     logout,

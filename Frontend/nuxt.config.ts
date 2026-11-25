@@ -1,5 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 
+const themeInitScript = `(function(){try{var m=document.cookie.match(/(?:^|; )mit_theme=([^;]+)/);var t=m?decodeURIComponent(m[1]):localStorage.getItem('mit_theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark');}}catch(e){}})();`
+
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
@@ -22,6 +24,12 @@ export default defineNuxtConfig({
           name: 'description',
           content:
             'makeiTiny ile uzun bağlantıları kısa, hatırlanabilir adreslere dönüştür. Tıklamaları izle, linkleri şifrele, istediğin an düzenle.'
+        }
+      ],
+      script: [
+        {
+          innerHTML: themeInitScript,
+          tagPosition: 'head'
         }
       ],
       link: [

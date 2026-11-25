@@ -10,6 +10,7 @@ require (
 	github.com/oapi-codegen/runtime v1.7.0
 	github.com/pressly/goose/v3 v3.30.0
 	github.com/redis/go-redis/v9 v9.23.0
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.59.0
 )
 

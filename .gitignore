@@ -2,8 +2,11 @@
 Backend/.idea/
 Backend/db/data/*
 !Backend/db/data/.gitkeep
+Backend/storage/qrcodes/*
+!Backend/storage/qrcodes/.gitkeep
 
 notes.txt
+*.local.md
 # Ortam Değişkenleri
 .env
 !.env.example

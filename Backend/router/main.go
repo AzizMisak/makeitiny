@@ -40,7 +40,16 @@ func main() {
 
 	ctx := context.Background()
 
-	pool, err := pgxpool.New(ctx, dbURL)
+	poolCfg, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		log.Fatalf("geçersiz DATABASE_URL: %v", err)
+	}
+	poolCfg.MaxConns = 20
+	poolCfg.MinConns = 2
+	poolCfg.MaxConnLifetime = 30 * time.Minute
+	poolCfg.MaxConnIdleTime = 5 * time.Minute
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		log.Fatalf("postgres bağlantı havuzu oluşturulamadı: %v", err)
 	}

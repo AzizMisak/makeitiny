@@ -16,6 +16,9 @@ export interface LinkItem {
   maxClicks?: number
   adEnabled: boolean
   securityStatus: SecurityStatus
+  hasQr: boolean
+  qrUrl: string
+  isAnonymous: boolean
   createdAt: string
 }
 
@@ -23,6 +26,27 @@ export interface AdminLinkItem extends LinkItem {
   userId: string
   userEmail: string
   userName: string
+}
+
+export interface CreateAnonymousLinkPayload {
+  target: string
+  password?: string
+  waitEnabled?: boolean
+  waitSeconds?: number
+  ttlHours?: number
+}
+
+export interface AnonymousLinkResponse {
+  id: string
+  alias: string
+  shortUrl: string
+  target: string
+  locked: boolean
+  waitEnabled: boolean
+  waitSeconds: number
+  expiresAt: string
+  hasQr: boolean
+  qrUrl: string
 }
 
 export interface LinkLogItem {
@@ -123,6 +147,8 @@ export interface AdminPaginatedUsersResponse {
 
 export interface AdminUpdateUserPayload {
   isActive?: boolean
+  banReason?: string
+  bannedUntil?: string
   planId?: number
   planExpiresAt?: string
 }

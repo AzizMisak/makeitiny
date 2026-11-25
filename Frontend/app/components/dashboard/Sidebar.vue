@@ -1,5 +1,7 @@
 <script setup lang="ts">
 const { user, primaryRole, isAdmin, isOwner, hasAnyRole } = useAuth()
+const { isDark, toggleTheme } = useTheme()
+const route = useRoute()
 
 const visibleNavGroups = computed(() =>
   dashboardNav
@@ -10,6 +12,18 @@ const visibleNavGroups = computed(() =>
     }))
     .filter((group) => group.items.length > 0)
 )
+
+const activeGroupAccent = (title: string): 'personal' | 'admin' | 'owner' => {
+  if (title === 'Yönetici') return 'admin'
+  if (title === 'Özel') return 'owner'
+  return 'personal'
+}
+
+const currentWorkspaceLabel = computed(() => {
+  if (route.path.startsWith('/dashboard/owner')) return 'OWNER ALANI'
+  if (route.path.startsWith('/dashboard/admin')) return 'ADMİN ALANI'
+  return 'KİŞİSEL ALAN'
+})
 
 const roleBadge = computed(() => {
   if (isOwner.value) return { label: 'OWNER', tone: 'accent' as const }
@@ -32,17 +46,47 @@ const quotaPercent = computed(() => {
 </script>
 
 <template>
-  <aside class="flex h-full w-64 flex-col border-r border-line bg-paper-2/60 p-4">
-    <div class="px-2 py-2">
+  <aside class="flex h-full w-66 flex-col border-r border-line bg-paper-2/60 p-4">
+    <div class="flex items-center justify-between px-2 py-2">
       <BrandLogo />
+      <button
+        type="button"
+        class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-sm border border-line bg-card text-ink-2 transition-colors hover:border-ink hover:text-ink"
+        :title="isDark ? 'Gündüz moduna geç' : 'Gece moduna geç'"
+        :aria-label="isDark ? 'Gündüz moduna geç' : 'Gece moduna geç'"
+        @click="toggleTheme"
+      >
+        <UiIcon :name="isDark ? 'sun' : 'moon'" :size="15" />
+      </button>
     </div>
 
-    <nav class="mt-7 flex flex-1 flex-col gap-6 overflow-y-auto pr-0.5" aria-label="Panel menüsü">
+    <div class="mx-2 mt-2 rounded-sm border border-line bg-card/80 px-2.5 py-1.5 font-mono text-[10px] font-bold tracking-wider text-ink-2">
+      AKTİF MOD: <span class="text-ink">{{ currentWorkspaceLabel }}</span>
+    </div>
+
+    <nav class="mt-5 flex flex-1 flex-col gap-5 overflow-y-auto pr-0.5" aria-label="Panel menüsü">
       <div v-for="group in visibleNavGroups" :key="group.title">
-        <p class="eyebrow mb-2 px-3 !text-ink-3">{{ group.title }}</p>
+        <p
+          class="eyebrow mb-2 flex items-center gap-1.5 px-3"
+          :class="{
+            '!text-amber-600 dark:!text-amber-400': group.title === 'Yönetici',
+            '!text-violet-600 dark:!text-violet-400': group.title === 'Özel',
+            '!text-ink-3': group.title !== 'Yönetici' && group.title !== 'Özel'
+          }"
+        >
+          <span
+            class="h-1.5 w-1.5 rounded-full"
+            :class="{
+              'bg-amber-500': group.title === 'Yönetici',
+              'bg-violet-500': group.title === 'Özel',
+              'bg-accent': group.title !== 'Yönetici' && group.title !== 'Özel'
+            }"
+          />
+          {{ group.title }}
+        </p>
         <ul class="flex flex-col gap-1">
           <li v-for="item in group.items" :key="item.to">
-            <DashboardSidebarLink :item="item" />
+            <DashboardSidebarLink :item="item" :tone="activeGroupAccent(group.title)" />
           </li>
         </ul>
       </div>

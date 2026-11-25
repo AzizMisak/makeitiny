@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/argon2"
 
-	"makeitiny/router/internal/db"
 	"makeitiny/router/internal/repository"
 )
 
@@ -71,8 +70,37 @@ func validateLinkAccess(rec repository.LinkRecord) error {
 	return nil
 }
 
-// Resolve kısa linki çözümler. Önce aktiflik, güvenlik, süre ve tıklama limitini kontrol eder;
-// geçerliyse tıklama sayısını artırır ve cihaz logunu yazar.
+func buildLogEntry(rec repository.LinkRecord, meta ClickLogMeta, eventType string) repository.LogQueueEntry {
+	return repository.LogQueueEntry{
+		LinkID:         rec.ID,
+		LinkAlias:      rec.Alias,
+		LinkPublicID:   rec.PublicID,
+		IPAddress:      meta.IPAddress,
+		UserAgent:      meta.UserAgent,
+		DeviceType:     meta.DeviceType,
+		Browser:        meta.Browser,
+		OS:             meta.OS,
+		Referer:        meta.Referer,
+		AcceptLanguage: meta.AcceptLanguage,
+		CountryCode:    meta.CountryCode,
+		EventType:      eventType,
+		ClickedAt:      time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+func (s *RedirectService) verifyTargetReachable(ctx context.Context, rec repository.LinkRecord) error {
+	if s.links.IsTargetReachableCached(ctx, rec.Alias) {
+		return nil
+	}
+	if err := checkTargetReachable(ctx, rec.TargetURL); err != nil {
+		return err
+	}
+	s.links.CacheTargetReachable(ctx, rec.Alias)
+	return nil
+}
+
+// Resolve kısa linki çözümler. Şifreli linklerde kilit açılmadan tıklama sayacı artırılmaz;
+// şifresiz linklerde Redis Pipeline ile tıklama farkı ve cihaz logu kuyruğa yazılır.
 func (s *RedirectService) Resolve(ctx context.Context, alias string, meta ClickLogMeta) (string, error) {
 	rec, err := s.links.GetByAlias(ctx, strings.TrimSpace(alias))
 	if err != nil {
@@ -86,28 +114,15 @@ func (s *RedirectService) Resolve(ctx context.Context, alias string, meta ClickL
 		return "", err
 	}
 
-	_ = s.links.IncrementClicks(ctx, rec.Alias)
-	if rec.ID > 0 {
-		_ = s.links.CreateLog(ctx, db.CreateLogParams{
-			LinkID:         rec.ID,
-			IpAddress:      meta.IPAddress,
-			UserAgent:      meta.UserAgent,
-			DeviceType:     meta.DeviceType,
-			Browser:        meta.Browser,
-			Os:             meta.OS,
-			Referer:        meta.Referer,
-			AcceptLanguage: meta.AcceptLanguage,
-			CountryCode:    meta.CountryCode,
-		})
-	}
-
 	if rec.PasswordHash != "" {
 		return "", ErrLinkLocked
 	}
 
-	if err := checkTargetReachable(ctx, rec.TargetURL); err != nil {
+	if err := s.verifyTargetReachable(ctx, rec); err != nil {
 		return "", ErrTargetUnreachable
 	}
+
+	s.links.RecordClickAndLog(ctx, rec, buildLogEntry(rec, meta, "redirect"))
 
 	if rec.WaitEnabled && rec.WaitSeconds > 0 {
 		return "", ErrLinkWaiting
@@ -116,9 +131,9 @@ func (s *RedirectService) Resolve(ctx context.Context, alias string, meta ClickL
 	return rec.TargetURL, nil
 }
 
-// Unlock şifreli kısa linkin parolasını Argon2id ile doğrular, doğruysa hedef URL'i döner.
-// Not: Tıklama sayısı ve cihaz logu ilk tıklama anında (Resolve içinde) kaydedildiği için burada tekrar artırılmaz.
-func (s *RedirectService) Unlock(ctx context.Context, alias, password string) (string, error) {
+// Unlock şifreli kısa linkin parolasını Argon2id ile doğrular.
+// Yalnızca parola doğruysa tıklama sayacı artırılır ve unlock_success logu kaydedilir.
+func (s *RedirectService) Unlock(ctx context.Context, alias, password string, meta ClickLogMeta) (string, error) {
 	rec, err := s.links.GetByAlias(ctx, strings.TrimSpace(alias))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -138,9 +153,11 @@ func (s *RedirectService) Unlock(ctx context.Context, alias, password string) (s
 		}
 	}
 
-	if err := checkTargetReachable(ctx, rec.TargetURL); err != nil {
+	if err := s.verifyTargetReachable(ctx, rec); err != nil {
 		return "", ErrTargetUnreachable
 	}
+
+	s.links.RecordClickAndLog(ctx, rec, buildLogEntry(rec, meta, "unlock_success"))
 
 	return rec.TargetURL, nil
 }

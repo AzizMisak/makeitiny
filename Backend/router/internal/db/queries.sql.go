@@ -7,11 +7,15 @@ package db
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createLog = `-- name: CreateLog :one
 INSERT INTO logs (
     link_id,
+    link_alias,
+    link_public_id,
     ip_address,
     user_agent,
     device_type,
@@ -19,27 +23,33 @@ INSERT INTO logs (
     os,
     referer,
     accept_language,
-    country_code
+    country_code,
+    event_type
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, link_id, ip_address, user_agent, device_type, browser, os, referer, accept_language, clicked_at, country_code
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+RETURNING id, link_id, ip_address, user_agent, device_type, browser, os, referer, accept_language, clicked_at, country_code, link_alias, link_public_id, event_type
 `
 
 type CreateLogParams struct {
-	LinkID         int64  `json:"link_id"`
-	IpAddress      string `json:"ip_address"`
-	UserAgent      string `json:"user_agent"`
-	DeviceType     string `json:"device_type"`
-	Browser        string `json:"browser"`
-	Os             string `json:"os"`
-	Referer        string `json:"referer"`
-	AcceptLanguage string `json:"accept_language"`
-	CountryCode    string `json:"country_code"`
+	LinkID         pgtype.Int8 `json:"link_id"`
+	LinkAlias      string      `json:"link_alias"`
+	LinkPublicID   string      `json:"link_public_id"`
+	IpAddress      string      `json:"ip_address"`
+	UserAgent      string      `json:"user_agent"`
+	DeviceType     string      `json:"device_type"`
+	Browser        string      `json:"browser"`
+	Os             string      `json:"os"`
+	Referer        string      `json:"referer"`
+	AcceptLanguage string      `json:"accept_language"`
+	CountryCode    string      `json:"country_code"`
+	EventType      string      `json:"event_type"`
 }
 
 func (q *Queries) CreateLog(ctx context.Context, arg CreateLogParams) (Log, error) {
 	row := q.db.QueryRow(ctx, createLog,
 		arg.LinkID,
+		arg.LinkAlias,
+		arg.LinkPublicID,
 		arg.IpAddress,
 		arg.UserAgent,
 		arg.DeviceType,
@@ -48,6 +58,7 @@ func (q *Queries) CreateLog(ctx context.Context, arg CreateLogParams) (Log, erro
 		arg.Referer,
 		arg.AcceptLanguage,
 		arg.CountryCode,
+		arg.EventType,
 	)
 	var i Log
 	err := row.Scan(
@@ -62,6 +73,9 @@ func (q *Queries) CreateLog(ctx context.Context, arg CreateLogParams) (Log, erro
 		&i.AcceptLanguage,
 		&i.ClickedAt,
 		&i.CountryCode,
+		&i.LinkAlias,
+		&i.LinkPublicID,
+		&i.EventType,
 	)
 	return i, err
 }
@@ -86,6 +100,7 @@ SELECT
     l.security_status,
     l.security_checked_at,
     l.qr_code_path,
+    l.is_anonymous,
     l.updated_at
 FROM links l
 LEFT JOIN users u ON u.id = l.user_id
@@ -93,9 +108,32 @@ WHERE l.alias = $1
 LIMIT 1
 `
 
-func (q *Queries) GetLinkByAlias(ctx context.Context, alias string) (Link, error) {
+type GetLinkByAliasRow struct {
+	ID                int64              `json:"id"`
+	PublicID          string             `json:"public_id"`
+	UserID            int64              `json:"user_id"`
+	Alias             string             `json:"alias"`
+	TargetUrl         string             `json:"target_url"`
+	PasswordHash      pgtype.Text        `json:"password_hash"`
+	Clicks            int64              `json:"clicks"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	WaitEnabled       bool               `json:"wait_enabled"`
+	WaitSeconds       int32              `json:"wait_seconds"`
+	Title             string             `json:"title"`
+	IsActive          pgtype.Bool        `json:"is_active"`
+	ExpiresAt         pgtype.Timestamptz `json:"expires_at"`
+	MaxClicks         pgtype.Int8        `json:"max_clicks"`
+	AdEnabled         bool               `json:"ad_enabled"`
+	SecurityStatus    string             `json:"security_status"`
+	SecurityCheckedAt pgtype.Timestamptz `json:"security_checked_at"`
+	QrCodePath        string             `json:"qr_code_path"`
+	IsAnonymous       bool               `json:"is_anonymous"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetLinkByAlias(ctx context.Context, alias string) (GetLinkByAliasRow, error) {
 	row := q.db.QueryRow(ctx, getLinkByAlias, alias)
-	var i Link
+	var i GetLinkByAliasRow
 	err := row.Scan(
 		&i.ID,
 		&i.PublicID,
@@ -115,6 +153,7 @@ func (q *Queries) GetLinkByAlias(ctx context.Context, alias string) (Link, error
 		&i.SecurityStatus,
 		&i.SecurityCheckedAt,
 		&i.QrCodePath,
+		&i.IsAnonymous,
 		&i.UpdatedAt,
 	)
 	return i, err

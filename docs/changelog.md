@@ -87,3 +87,22 @@ Bu doküman, MakeItTiny projesinde gerçekleştirilen altyapı, mimari ve geliş
 
 ## 8. Yapay Zeka Asistanı Rehberi (`agents.md`)
 - Kök dizine projenin amacını, mimari yapısını, yönlendirme/port kurallarını, teknik standartlarını (`sqlc`, `goose`, `Redis Hash`, `Argon2id`, `Base62`) ve kesin çalışma/iletişim kurallarını (istenmeyen iş yapmama, belirsizlikleri tartışma, commit atmama, tur sonu özeti verme) içeren `agents.md` dosyası eklendi.
+
+---
+
+## 9. Güvenlik, Performans (Write-Behind), Anonim Kısaltma, QR Depolama ve Frontend UX Dönüşümü
+- **Veritabanı (`00004_user_public_id_bans_anon_qr.sql`) & `sqlc`:**
+  - `users` tablosuna 16 karakterli `public_id`, `ban_reason`, `banned_at`, `banned_until` alanları ve `owner` silinmesini engelleyen `trg_prevent_owner_delete` trigger'ı eklendi.
+  - `links` tablosuna `is_anonymous` ve `created_by_ip` eklendi; `logs.link_id` `ON DELETE SET NULL` yapılarak `link_alias`, `link_public_id`, `event_type` ile denetim izi korundu. Refresh token rotasyonu için `refresh_tokens` tablosu oluşturuldu.
+- **Kimlik Doğrulama & Ban (`Backend/api`):**
+  - 15 dakikalık kısa ömürlü JWT (`JTI` destekli) + `HttpOnly` Refresh Token rotasyonu (`POST /api/auth/refresh`, replay tespitli oturum iptali) devreye alındı.
+  - Admin/Owner kullanıcı banlama (`reason` + süreli/kalıcı) ve Redis üzerinden anlık JWT/oturum geçersiz kılma (`user:revoked_before`, `jwt:blacklist`) eklendi.
+- **Redis Write-Behind & Router Optimizasyonu (`Backend/api`, `Backend/router`):**
+  - Router sıcak yönlendirme yolu PostgreSQL'e senkron yazma yerine Redis Pipeline (`HINCRBY`, `RPUSH logs:queue`) + `clicks:deltas` modeline geçirildi; `api` servisine 30 saniyelik toplu PostgreSQL aktarım worker'ı (`worker.go`) eklendi.
+  - Şifreli linklerin yalnızca `/unlock` başarısında sayım yapması ve hedef URL erişilebilirlik durumunun 5 dakika Redis'te önbelleklenmesi sağlandı.
+- **Anonim Kısaltma & QR Kod Sistemi:**
+  - `POST /api/links/anonymous` ile IP bazlı günde 1 link (`429` limiti, en fazla 48 saat ömür, parola/QR/bekleme desteği) eklendi.
+  - `go-qrcode` ile paylaşımlı `./Backend/storage/qrcodes` disk hacmine PNG üretimi (`POST/GET/DELETE /api/links/{id}/qr`), alias değişiminde otomatik yenileme ve silmede temizlik kurgulandı.
+- **Frontend & Depo Yapılandırması:**
+  - `.gitattributes` ile GitHub Linguist dil algılaması Go odaklı yapılandırıldı.
+  - Frontend'de zero-FOUC gece modu, Kişisel / Yönetim / Owner görsel çalışma alanı ayrımı, otomatik 401 refresh & retry, link silme onay modalı, anonim kısaltma bölümü (kopyalama uyarılı), QR yönetimi ve admin ban/moderasyon ekranları tamamlandı.

@@ -6,7 +6,7 @@ definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 const route = useRoute()
 const { public: config } = useRuntimeConfig()
 const { user, isAdmin, canUseFeature } = useAuth()
-const { getLink, getLinkLogs, updateLink, removeLink, checkAlias } = useLinks()
+const { getLink, getLinkLogs, updateLink, removeLink, checkAlias, generateQr, deleteQr } = useLinks()
 
 const id = computed(() => String(route.params.id ?? ''))
 const link = ref<LinkItem | null>(null)
@@ -38,7 +38,13 @@ const aliasCheckMsg = ref<{ available: boolean; text: string } | null>(null)
 
 const canCustomAlias = computed(() => canUseFeature('allowCustomAlias'))
 const canPassword = computed(() => canUseFeature('allowPassword'))
+const canQr = computed(() => canUseFeature('allowQr'))
 const canAds = computed(() => canUseFeature('allowAds'))
+const qrLoading = ref(false)
+const qrError = ref('')
+const qrNonce = ref(Date.now())
+const qrImageUrl = computed(() => (link.value?.hasQr ? `${config.apiBase}/links/${link.value.id}/qr?v=${qrNonce.value}` : ''))
+const qrDownloadUrl = computed(() => (link.value?.hasQr ? `${config.apiBase}/links/${link.value.id}/qr?download=1` : ''))
 const analyticsLimitLabel = computed(() =>
   isAdmin.value ? 'Tam Arşiv (Sınırsız)' : `Son ${user.value?.plan?.analyticsDays ?? 7} Gün`
 )
@@ -735,12 +741,42 @@ async function handleSave() {
       adEnabled: canAds.value ? editAdEnabled.value : link.value.adEnabled
     })
     syncFormFromLink(updated)
+    qrNonce.value = Date.now()
     saveSuccess.value = true
     setTimeout(() => (saveSuccess.value = false), 2500)
   } catch (e: any) {
     saveError.value = e?.message ?? 'Link güncellenirken bir hata oluştu.'
   } finally {
     saving.value = false
+  }
+}
+
+async function handleGenerateQr() {
+  if (!link.value) return
+  qrError.value = ''
+  qrLoading.value = true
+  try {
+    const updated = await generateQr(link.value.id)
+    link.value = updated
+    qrNonce.value = Date.now()
+  } catch (e: any) {
+    qrError.value = e?.message ?? 'QR kod üretilemedi.'
+  } finally {
+    qrLoading.value = false
+  }
+}
+
+async function handleDeleteQr() {
+  if (!link.value) return
+  qrError.value = ''
+  qrLoading.value = true
+  try {
+    await deleteQr(link.value.id)
+    link.value = { ...link.value, hasQr: false, qrUrl: '' }
+  } catch (e: any) {
+    qrError.value = e?.message ?? 'QR kod silinemedi.'
+  } finally {
+    qrLoading.value = false
   }
 }
 
@@ -1041,6 +1077,60 @@ async function handleDelete() {
                 <template v-else>Doğrudan Yönlendirme (302 Found)</template>
               </p>
             </div>
+          </div>
+
+          <!-- QR Kod Yönetimi -->
+          <div class="flex flex-col gap-4 rounded-lg border-[1.5px] border-ink bg-card p-6 shadow-hard">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <UiIcon name="qr" :size="18" />
+                <h3 class="text-lg font-bold">QR Kod</h3>
+              </div>
+              <UiBadge v-if="!canQr" tone="accent">Pro Özelliği</UiBadge>
+              <UiBadge v-else-if="link.hasQr" tone="ok">Hazır</UiBadge>
+            </div>
+
+            <p v-if="qrError" class="rounded-md border border-accent-dark bg-accent-soft px-3 py-2 text-xs text-accent-dark">
+              {{ qrError }}
+            </p>
+
+            <div v-if="link.hasQr" class="flex flex-col items-center gap-3 rounded-md border border-line bg-paper p-4">
+              <img
+                :src="qrImageUrl"
+                :alt="`${link.alias} QR Kodu`"
+                class="h-40 w-40 rounded-sm border border-line bg-white p-1.5"
+              />
+              <div class="flex flex-wrap items-center justify-center gap-2">
+                <a
+                  :href="qrDownloadUrl"
+                  class="inline-flex items-center gap-1.5 rounded-md border-[1.5px] border-ink bg-card px-3 py-1.5 text-xs font-semibold text-ink shadow-hard hover:bg-paper-2"
+                >
+                  <UiIcon name="download" :size="14" /> PNG İndir
+                </a>
+                <UiButton v-if="canQr" variant="secondary" :disabled="qrLoading" @click="handleGenerateQr">
+                  <UiIcon name="refresh" :size="14" /> Yenile
+                </UiButton>
+                <UiButton v-if="canQr" variant="danger" :disabled="qrLoading" @click="handleDeleteQr">
+                  <UiIcon name="trash" :size="14" /> Sil
+                </UiButton>
+              </div>
+            </div>
+
+            <template v-else>
+              <p class="text-xs text-ink-3">
+                {{
+                  canQr
+                    ? 'Bu kısa link için 512x512 yüksek kaliteli PNG QR kodu oluşturup indirebilirsin.'
+                    : 'QR kod oluşturma özelliği paketinde kapalı. Pro veya Kurumsal pakete geçerek aktif edebilirsin.'
+                }}
+              </p>
+              <div class="flex gap-2">
+                <UiButton v-if="canQr" :disabled="qrLoading" @click="handleGenerateQr">
+                  <UiIcon name="qr" :size="15" /> {{ qrLoading ? 'Üretiliyor...' : 'QR Kod Oluştur' }}
+                </UiButton>
+                <UiButton v-else to="/dashboard/subscription" variant="secondary">Paketleri İncele</UiButton>
+              </div>
+            </template>
           </div>
 
           <div class="flex flex-col gap-4 rounded-lg border-[1.5px] border-ink bg-card p-6 shadow-hard">

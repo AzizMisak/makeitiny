@@ -126,14 +126,16 @@ onMounted(() => loadUsers(1))
               <span class="font-mono text-xs text-ink-2">{{ u.email }}</span>
               <UiBadge :tone="roleBadgeMeta(u.roles).tone">{{ roleBadgeMeta(u.roles).label }}</UiBadge>
               <UiBadge :tone="u.isActive ? 'ok' : 'accent'">
-                {{ u.isActive ? 'Aktif' : 'Askıda' }}
+                {{ u.isActive ? 'Aktif' : 'Banlı / Askıda' }}
               </UiBadge>
             </div>
 
             <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-ink-3">
+              <span>ID: {{ u.id }}</span>
               <span>Paket: <strong class="text-ink-2">{{ u.plan.name }}</strong></span>
               <span>Bitiş: {{ u.planExpiresAt ? formatDateTr(u.planExpiresAt) : 'Süresiz' }}</span>
               <span>Kayıt: {{ formatDateTr(u.createdAt) }}</span>
+              <span v-if="!u.isActive && u.banReason" class="text-accent-dark">Sebep: {{ u.banReason }}</span>
             </div>
           </div>
 

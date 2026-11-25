@@ -121,7 +121,7 @@ func (h *Handler) Unlock(w http.ResponseWriter, r *http.Request, link string) {
 		return
 	}
 
-	target, err := h.redirects.Unlock(r.Context(), link, req.Password)
+	target, err := h.redirects.Unlock(r.Context(), link, req.Password, extractClickMeta(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidPassword):

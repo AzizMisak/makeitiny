@@ -27,6 +27,10 @@ const saving = ref(false)
 const selectedPlanId = ref(1)
 const selectedPlanExpiresAt = ref('')
 
+const banReasonInput = ref('')
+const banDurationPreset = ref<'permanent' | '1d' | '7d' | '30d' | 'custom'>('permanent')
+const banCustomDate = ref('')
+
 const confirmPlanOpen = ref(false)
 const confirmStatusOpen = ref(false)
 const confirmRoleOpen = ref(false)
@@ -45,6 +49,7 @@ function syncUserDraft(u: User) {
   targetUser.value = u
   selectedPlanId.value = u.plan?.id ?? 1
   selectedPlanExpiresAt.value = u.planExpiresAt ?? ''
+  banReasonInput.value = u.banReason ?? ''
 }
 
 const canManageAccount = computed(() => {
@@ -64,6 +69,13 @@ const canChangeRole = computed(() => {
   const u = targetUser.value
   if (!u || !isOwner.value) return false
   return !u.roles.includes('owner')
+})
+
+const computedBannedUntil = computed<string>(() => {
+  if (banDurationPreset.value === 'permanent') return ''
+  if (banDurationPreset.value === 'custom') return banCustomDate.value.trim()
+  const days = banDurationPreset.value === '1d' ? 1 : banDurationPreset.value === '7d' ? 7 : 30
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
 })
 
 const planChanges = computed<ConfirmChangeItem[]>(() => {
@@ -141,15 +153,18 @@ async function confirmPlanSave() {
 
 async function confirmStatusToggle() {
   if (!targetUser.value || !canToggleActive.value) return
+  const nextActive = !targetUser.value.isActive
   saving.value = true
   try {
     const updated = await adminUpdateUser(targetUser.value.id, {
-      isActive: !targetUser.value.isActive
+      isActive: nextActive,
+      banReason: nextActive ? '' : banReasonInput.value.trim(),
+      bannedUntil: nextActive ? '' : computedBannedUntil.value
     })
     syncUserDraft(updated)
     confirmStatusOpen.value = false
     toast.success(
-      updated.isActive ? 'Kullanıcı hesabı aktifleştirildi.' : 'Kullanıcı hesabı askıya alındı.'
+      updated.isActive ? 'Kullanıcı yasağı kaldırıldı.' : 'Kullanıcı banlandı ve aktif oturumları kapatıldı.'
     )
   } catch (err: any) {
     toast.error(err?.message ?? 'Hesap durumu güncellenemedi.')
@@ -209,13 +224,14 @@ onMounted(loadUserDetail)
     <template v-else>
       <DashboardPageHeader
         :title="targetUser.name || 'İsimsiz Kullanıcı'"
-        :description="targetUser.email"
+        :description="`${targetUser.email} • ID: ${targetUser.id}`"
       />
 
       <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         <DashboardStatTile
           label="Hesap durumu"
-          :value="targetUser.isActive ? 'Aktif' : 'Askıda'"
+          :value="targetUser.isActive ? 'Aktif' : 'Banlı / Askıda'"
+          :note="!targetUser.isActive && targetUser.bannedUntil ? `Bitiş: ${formatDateTimeTr(targetUser.bannedUntil)}` : undefined"
         />
         <DashboardStatTile
           label="Rol"
@@ -241,7 +257,7 @@ onMounted(loadUserDetail)
         >
           <div>
             <div class="flex items-center justify-between gap-2 border-b border-line pb-4">
-              <h2 class="text-xl font-bold">Paket & süre yönetimi</h2>
+              <h2 class="text-xl font-bold">Paket &amp; süre yönetimi</h2>
               <UiBadge v-if="!canManageAccount" tone="neutral">
                 <UiIcon name="lock" :size="11" /> Korumalı
               </UiBadge>
@@ -290,33 +306,85 @@ onMounted(loadUserDetail)
           </div>
         </form>
 
-        <!-- Hesap Durumu ve Yetki Kartı -->
+        <!-- Hesap Ban / Ceza ve Yetki Kartı -->
         <div class="flex flex-col gap-6">
           <div class="rounded-lg border-[1.5px] border-ink bg-card p-6 shadow-hard">
             <div class="flex items-center justify-between gap-2 border-b border-line pb-4">
-              <h2 class="text-xl font-bold">Hesap erişim durumu</h2>
+              <div class="flex items-center gap-2">
+                <UiIcon name="user-x" :size="18" />
+                <h2 class="text-xl font-bold">Hesap Ban &amp; Cezalandırma</h2>
+              </div>
               <UiBadge :tone="targetUser.isActive ? 'ok' : 'accent'">
-                {{ targetUser.isActive ? 'Aktif' : 'Askıda' }}
+                {{ targetUser.isActive ? 'Aktif' : 'Banlı' }}
               </UiBadge>
             </div>
 
             <p v-if="!canToggleActive" class="mt-4 text-sm text-ink-2">
               Bu hesabın durumu mevcut yetki seviyenle değiştirilemez.
             </p>
-            <template v-else>
+
+            <template v-else-if="targetUser.isActive">
               <p class="mt-4 text-sm text-ink-2">
-                {{
-                  targetUser.isActive
-                    ? 'Hesap askıya alındığında kullanıcı sisteme giriş yapamaz.'
-                    : 'Hesap şu anda askıda. Yeniden aktifleştirerek giriş izni verebilirsin.'
-                }}
+                Hesabı banladığınızda kullanıcının mevcut oturumu anında sonlandırılır ve linkleri yönlendirilmez.
               </p>
+
+              <div class="mt-4 flex flex-col gap-3">
+                <UiField
+                  id="ban-reason"
+                  v-model="banReasonInput"
+                  label="Ban / Ceza Sebebi"
+                  type="text"
+                  placeholder="Örn. Spam veya zararlı link paylaşımı"
+                />
+
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label for="ban-duration" class="mb-1.5 block text-sm font-semibold">Ceza Süresi</label>
+                    <select
+                      id="ban-duration"
+                      v-model="banDurationPreset"
+                      class="w-full rounded-md border-[1.5px] border-ink bg-card px-3 py-2.5 text-sm font-semibold text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+                    >
+                      <option value="permanent">Kalıcı (Süresiz)</option>
+                      <option value="1d">24 Saat (1 Gün)</option>
+                      <option value="7d">7 Gün</option>
+                      <option value="30d">30 Gün</option>
+                      <option value="custom">Özel Tarih</option>
+                    </select>
+                  </div>
+
+                  <UiField
+                    v-if="banDurationPreset === 'custom'"
+                    id="ban-custom-date"
+                    v-model="banCustomDate"
+                    label="Bitiş Tarihi"
+                    type="date"
+                  />
+                </div>
+              </div>
+
               <div class="mt-4">
-                <UiButton
-                  :variant="targetUser.isActive ? 'danger' : 'primary'"
-                  @click="confirmStatusOpen = true"
-                >
-                  {{ targetUser.isActive ? 'Hesabı askıya al...' : 'Hesabı aktifleştir...' }}
+                <UiButton variant="danger" @click="confirmStatusOpen = true">
+                  <UiIcon name="ban" :size="15" /> Kullanıcıyı Banla...
+                </UiButton>
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="mt-4 rounded-md border border-accent-dark bg-accent-soft p-4 text-sm">
+                <p class="font-bold text-accent-dark">Hesap şu anda banlı / askıda</p>
+                <p v-if="targetUser.banReason" class="mt-1 text-ink">
+                  <strong>Sebep:</strong> {{ targetUser.banReason }}
+                </p>
+                <p class="mt-1 font-mono text-xs text-ink-2">
+                  <strong>Bitiş:</strong>
+                  {{ targetUser.bannedUntil ? formatDateTimeTr(targetUser.bannedUntil) : 'Süresiz (Kalıcı)' }}
+                </p>
+              </div>
+
+              <div class="mt-4">
+                <UiButton variant="primary" @click="confirmStatusOpen = true">
+                  <UiIcon name="unlock" :size="15" /> Banı Kaldır (Aktifleştir)...
                 </UiButton>
               </div>
             </template>
@@ -409,17 +477,25 @@ onMounted(loadUserDetail)
         @confirm="confirmPlanSave"
       />
 
-      <!-- Hesap Askıya Alma / Aktifleştirme Onay Modalı -->
+      <!-- Hesap Ban / Aktifleştirme Onay Modalı -->
       <UiConfirmModal
         :open="confirmStatusOpen"
-        :title="targetUser.isActive ? 'Hesabı askıya al' : 'Hesabı aktifleştir'"
+        :title="targetUser.isActive ? 'Kullanıcıyı banla' : 'Kullanıcı banını kaldır'"
         :target-label="`${targetUser.name || 'Kullanıcı'} (${targetUser.email})`"
         :description="
           targetUser.isActive
-            ? 'Bu kullanıcının hesabı askıya alınacak ve mevcut oturumu sonlandırılacak.'
-            : 'Bu kullanıcının hesabı yeniden aktifleştirilecek.'
+            ? 'Bu kullanıcının hesabı banlanacak, mevcut oturumu ve refresh tokenları iptal edilecek, linkleri kapatılacak.'
+            : 'Bu kullanıcının banı kaldırılacak ve hesabı yeniden aktifleştirilecek.'
         "
-        :confirm-label="targetUser.isActive ? 'Evet, askıya al' : 'Evet, aktifleştir'"
+        :changes="
+          targetUser.isActive
+            ? [
+                { label: 'Sebep', from: '—', to: banReasonInput.trim() || 'Belirtilmedi' },
+                { label: 'Süre', from: 'Aktif', to: computedBannedUntil ? formatDateTimeTr(computedBannedUntil) : 'Süresiz (Kalıcı)' }
+              ]
+            : undefined
+        "
+        :confirm-label="targetUser.isActive ? 'Evet, banla' : 'Evet, banı kaldır'"
         :variant="targetUser.isActive ? 'danger' : 'primary'"
         :loading="saving"
         @cancel="confirmStatusOpen = false"

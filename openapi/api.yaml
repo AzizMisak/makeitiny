@@ -133,11 +133,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /auth/refresh:
+    post:
+      operationId: refreshToken
+      tags: [Auth]
+      summary: Refresh token kullanarak yeni kısa ömürlü Access JWT al (token rotasyonu)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Token yenilendi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Geçersiz, süresi dolmuş veya iptal edilmiş refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Hesap askıya alınmış
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /auth/resetpass:
     post:
       operationId: resetPassword
       tags: [Auth]
       summary: Kullanıcı şifresini değiştir / sıfırla
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -288,6 +321,37 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /links/anonymous:
+    post:
+      operationId: createAnonymousLink
+      tags: [Links]
+      summary: Üyeliksiz geçici kısa link oluştur (maksimum 2 gün, IP başına günde 1 adet)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnonymousLinkRequest'
+      responses:
+        '201':
+          description: Anonim kısa link oluşturuldu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnonymousLinkResponse'
+        '400':
+          description: Geçersiz URL veya parametre
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Günlük anonim link oluşturma limiti aşıldı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /links/check-alias/{alias}:
     get:
       operationId: checkAlias
@@ -426,6 +490,90 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /links/{id}/qr:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getLinkQr
+      tags: [Links]
+      summary: Linke ait QR kod PNG görselini getir (?download=1 ile indirme)
+      parameters:
+        - name: download
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: QR kod PNG görseli
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: QR kod veya link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      operationId: generateLinkQr
+      tags: [Links]
+      summary: Link için QR kod görseli oluştur veya yeniden üret
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: QR kod oluşturuldu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkItem'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Paket QR özelliğini desteklemiyor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      operationId: deleteLinkQr
+      tags: [Links]
+      summary: Linke ait QR kod görselini sil
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: QR kod silindi
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /links/logs/{id}:
     parameters:
       - name: id
@@ -539,7 +687,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [all, active, inactive, blocked]
+            enum: [all, active, inactive, blocked, anonymous]
       responses:
         '200':
           description: Tüm linklerin sayfalı listesi
@@ -567,6 +715,31 @@ paths:
         required: true
         schema:
           type: string
+    get:
+      operationId: adminGetLink
+      tags: [Admin]
+      summary: Tek bir linkin yönetici detayını getir (admin/owner)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Link detayı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminLinkItem'
+        '403':
+          description: Yetersiz rol yetkisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     patch:
       operationId: adminUpdateLink
       tags: [Admin]
@@ -728,6 +901,31 @@ paths:
         required: true
         schema:
           type: string
+    get:
+      operationId: adminGetUser
+      tags: [Admin]
+      summary: Tek bir kullanıcının yönetici detayını getir (admin/owner)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Kullanıcı detayı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '403':
+          description: Yetersiz yetki
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Kullanıcı bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     patch:
       operationId: adminUpdateUser
       tags: [Admin]
@@ -950,6 +1148,7 @@ components:
         - name
         - email
         - isActive
+        - banReason
         - roles
         - plan
         - linkCount
@@ -957,7 +1156,7 @@ components:
       properties:
         id:
           type: string
-          example: "1"
+          example: "aB3xK9mZpQ2vL7nR"
         name:
           type: string
           example: aziz
@@ -968,6 +1167,12 @@ components:
         isActive:
           type: boolean
           example: true
+        banReason:
+          type: string
+          example: ""
+        bannedUntil:
+          type: string
+          example: "2026-12-01T23:59:59Z"
         roles:
           type: array
           items:
@@ -1045,6 +1250,13 @@ components:
         user:
           $ref: '#/components/schemas/User'
 
+    RefreshTokenRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+          example: optional_refresh_token_if_not_cookie
+
     LinkItem:
       type: object
       required:
@@ -1059,6 +1271,9 @@ components:
         - isActive
         - adEnabled
         - securityStatus
+        - hasQr
+        - qrUrl
+        - isAnonymous
         - createdAt
       properties:
         id:
@@ -1104,9 +1319,90 @@ components:
         securityStatus:
           type: string
           example: "unchecked"
+        hasQr:
+          type: boolean
+          example: true
+        qrUrl:
+          type: string
+          example: "/api/links/k9Xm2pQ7vR4nL8wZ/qr"
+        isAnonymous:
+          type: boolean
+          example: false
         createdAt:
           type: string
           example: "2026-10-02"
+
+    CreateAnonymousLinkRequest:
+      type: object
+      required:
+        - target
+      properties:
+        target:
+          type: string
+          format: uri
+          example: https://example.com/gecici
+        password:
+          type: string
+          example: gizli123
+        waitEnabled:
+          type: boolean
+          example: false
+        waitSeconds:
+          type: integer
+          format: int32
+          example: 5
+        ttlHours:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 48
+          example: 48
+
+    AnonymousLinkResponse:
+      type: object
+      required:
+        - id
+        - alias
+        - shortUrl
+        - target
+        - locked
+        - waitEnabled
+        - waitSeconds
+        - expiresAt
+        - hasQr
+        - qrUrl
+      properties:
+        id:
+          type: string
+          example: "k9Xm2pQ7vR4nL8wZ"
+        alias:
+          type: string
+          example: "x7Kp2q"
+        shortUrl:
+          type: string
+          example: "http://localhost/r/x7Kp2q"
+        target:
+          type: string
+          example: "https://example.com/gecici"
+        locked:
+          type: boolean
+          example: false
+        waitEnabled:
+          type: boolean
+          example: false
+        waitSeconds:
+          type: integer
+          format: int32
+          example: 0
+        expiresAt:
+          type: string
+          example: "2026-11-27T17:30:00Z"
+        hasQr:
+          type: boolean
+          example: true
+        qrUrl:
+          type: string
+          example: "/api/links/k9Xm2pQ7vR4nL8wZ/qr"
 
     AdminLinkItem:
       allOf:
@@ -1456,6 +1752,13 @@ components:
         isActive:
           type: boolean
           example: true
+        banReason:
+          type: string
+          example: Spam ve zararlı link paylaşımı
+        bannedUntil:
+          type: string
+          description: ISO 8601 veya YYYY-MM-DD bitiş tarihi; boş string gönderilirse süresiz ban.
+          example: "2026-12-01"
         planId:
           type: integer
           format: int32

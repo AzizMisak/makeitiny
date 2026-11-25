@@ -18,6 +18,7 @@ SELECT
     l.security_status,
     l.security_checked_at,
     l.qr_code_path,
+    l.is_anonymous,
     l.updated_at
 FROM links l
 LEFT JOIN users u ON u.id = l.user_id
@@ -32,6 +33,8 @@ WHERE alias = $1;
 -- name: CreateLog :one
 INSERT INTO logs (
     link_id,
+    link_alias,
+    link_public_id,
     ip_address,
     user_agent,
     device_type,
@@ -39,7 +42,8 @@ INSERT INTO logs (
     os,
     referer,
     accept_language,
-    country_code
+    country_code,
+    event_type
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING *;

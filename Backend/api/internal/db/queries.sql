@@ -1,6 +1,6 @@
 -- name: CreateUser :one
-INSERT INTO users (name, email, password_hash)
-VALUES ($1, $2, $3)
+INSERT INTO users (public_id, name, email, password_hash)
+VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: AssignRoleByName :exec
@@ -29,6 +29,11 @@ SELECT * FROM users
 WHERE id = $1
 LIMIT 1;
 
+-- name: GetUserByPublicID :one
+SELECT * FROM users
+WHERE public_id = $1
+LIMIT 1;
+
 -- name: UpdateUserPassword :execrows
 UPDATE users
 SET password_hash = $2,
@@ -37,7 +42,21 @@ WHERE email = $1;
 
 -- name: DeleteUser :execrows
 DELETE FROM users
-WHERE id = $1;
+WHERE id = $1
+  AND NOT EXISTS (
+      SELECT 1 FROM users_roles ur
+      WHERE ur.user_id = users.id AND ur.role_id = 3
+  );
+
+-- name: UnbanUser :one
+UPDATE users
+SET is_active = TRUE,
+    ban_reason = '',
+    banned_at = NULL,
+    banned_until = NULL,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
 
 -- name: GetPlanByID :one
 SELECT id, slug, name, price_monthly::FLOAT8 AS price_monthly, max_links, allow_custom_alias, allow_password, allow_qr, allow_ads, analytics_days, created_at
@@ -90,6 +109,66 @@ INSERT INTO links (
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING *;
+
+-- name: CreateAnonymousLink :one
+INSERT INTO links (
+    public_id,
+    user_id,
+    alias,
+    target_url,
+    password_hash,
+    wait_enabled,
+    wait_seconds,
+    is_active,
+    expires_at,
+    is_anonymous,
+    created_by_ip
+)
+VALUES ($1, NULL, $2, $3, $4, $5, $6, TRUE, $7, TRUE, $8)
+RETURNING *;
+
+-- name: CountRecentAnonymousLinksByIP :one
+SELECT COUNT(*)::BIGINT FROM links
+WHERE is_anonymous = TRUE
+  AND created_by_ip = $1
+  AND created_at >= NOW() - INTERVAL '24 hours';
+
+-- name: DeleteExpiredAnonymousLinks :many
+DELETE FROM links
+WHERE is_anonymous = TRUE
+  AND expires_at IS NOT NULL
+  AND expires_at <= NOW()
+RETURNING id, alias, qr_code_path;
+
+-- name: UpdateLinkQRPath :one
+UPDATE links
+SET qr_code_path = $2,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: IncrementLinkClicksByDelta :exec
+UPDATE links
+SET clicks = clicks + $2
+WHERE alias = $1;
+
+-- name: CreateLogEntry :exec
+INSERT INTO logs (
+    link_id,
+    link_alias,
+    link_public_id,
+    ip_address,
+    user_agent,
+    device_type,
+    browser,
+    os,
+    referer,
+    accept_language,
+    country_code,
+    event_type,
+    clicked_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
 
 -- name: ListLinksByUser :many
 SELECT * FROM links
@@ -184,12 +263,12 @@ FROM links;
 -- name: CountAdminUsers :one
 SELECT COUNT(*)::BIGINT
 FROM users
-WHERE ($1::text = '' OR email ILIKE '%' || $1 || '%' OR name ILIKE '%' || $1 || '%');
+WHERE ($1::text = '' OR email ILIKE '%' || $1 || '%' OR name ILIKE '%' || $1 || '%' OR public_id ILIKE '%' || $1 || '%');
 
 -- name: ListAdminUsersPaginated :many
 SELECT *
 FROM users
-WHERE ($1::text = '' OR email ILIKE '%' || $1 || '%' OR name ILIKE '%' || $1 || '%')
+WHERE ($1::text = '' OR email ILIKE '%' || $1 || '%' OR name ILIKE '%' || $1 || '%' OR public_id ILIKE '%' || $1 || '%')
 ORDER BY created_at DESC, id DESC
 LIMIT $2 OFFSET $3;
 
@@ -198,6 +277,9 @@ UPDATE users
 SET plan_id = $2,
     plan_expires_at = $3,
     is_active = $4,
+    ban_reason = $5,
+    banned_at = $6,
+    banned_until = $7,
     updated_at = NOW()
 WHERE id = $1
 RETURNING *;
@@ -212,11 +294,13 @@ WHERE ($1::text = '' OR l.alias ILIKE '%' || $1 || '%' OR l.target_url ILIKE '%'
     OR ($2::text = 'active' AND l.is_active = TRUE AND l.security_status <> 'blocked' AND l.security_status <> 'malicious')
     OR ($2::text = 'inactive' AND l.is_active = FALSE)
     OR ($2::text = 'blocked' AND (l.security_status = 'blocked' OR l.security_status = 'malicious'))
+    OR ($2::text = 'anonymous' AND l.is_anonymous = TRUE)
   );
 
 -- name: ListAdminLinksPaginated :many
 SELECT
     l.*,
+    COALESCE(u.public_id, '') AS user_public_id,
     COALESCE(u.email, '') AS user_email,
     COALESCE(u.name, '') AS user_name
 FROM links l
@@ -227,9 +311,21 @@ WHERE ($1::text = '' OR l.alias ILIKE '%' || $1 || '%' OR l.target_url ILIKE '%'
     OR ($2::text = 'active' AND l.is_active = TRUE AND l.security_status <> 'blocked' AND l.security_status <> 'malicious')
     OR ($2::text = 'inactive' AND l.is_active = FALSE)
     OR ($2::text = 'blocked' AND (l.security_status = 'blocked' OR l.security_status = 'malicious'))
+    OR ($2::text = 'anonymous' AND l.is_anonymous = TRUE)
   )
 ORDER BY l.created_at DESC, l.id DESC
 LIMIT $3 OFFSET $4;
+
+-- name: GetAdminLinkByPublicID :one
+SELECT
+    l.*,
+    COALESCE(u.public_id, '') AS user_public_id,
+    COALESCE(u.email, '') AS user_email,
+    COALESCE(u.name, '') AS user_name
+FROM links l
+LEFT JOIN users u ON u.id = l.user_id
+WHERE l.public_id = $1
+LIMIT 1;
 
 -- name: AdminUpdateLink :one
 UPDATE links
@@ -252,3 +348,28 @@ RETURNING *;
 -- name: AdminDeleteLink :execrows
 DELETE FROM links
 WHERE id = $1;
+
+-- name: CreateRefreshToken :one
+INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING *;
+
+-- name: GetRefreshTokenByHash :one
+SELECT * FROM refresh_tokens
+WHERE token_hash = $1
+LIMIT 1;
+
+-- name: RevokeRefreshTokenByHash :exec
+UPDATE refresh_tokens
+SET revoked_at = NOW()
+WHERE token_hash = $1 AND revoked_at IS NULL;
+
+-- name: RevokeAllUserRefreshTokens :exec
+UPDATE refresh_tokens
+SET revoked_at = NOW()
+WHERE user_id = $1 AND revoked_at IS NULL;
+
+-- name: DeleteExpiredRefreshTokens :exec
+DELETE FROM refresh_tokens
+WHERE expires_at < NOW() - INTERVAL '1 day'
+   OR (revoked_at IS NOT NULL AND revoked_at < NOW() - INTERVAL '7 days');

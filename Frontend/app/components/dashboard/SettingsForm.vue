@@ -13,8 +13,8 @@ const deleting = ref(false)
 const roleBadge = computed(() => roleBadgeMeta(roles.value))
 
 async function handlePasswordSave() {
-  if (newPassword.value.length < 6) {
-    toast.error('Şifre en az 6 karakter olmalı.')
+  if (newPassword.value.length < 4) {
+    toast.error('Şifre en az 4 karakter olmalı.')
     return
   }
   if (newPassword.value !== confirmPassword.value) {
@@ -122,7 +122,7 @@ async function handleDeleteAccount() {
             v-model="newPassword"
             label="Yeni şifre"
             type="password"
-            placeholder="En az 6 karakter"
+            placeholder="En az 4 karakter"
             autocomplete="new-password"
           />
           <UiField

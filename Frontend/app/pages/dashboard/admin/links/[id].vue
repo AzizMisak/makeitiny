@@ -30,6 +30,7 @@ const editAdEnabled = ref(false)
 
 const confirmSaveOpen = ref(false)
 const confirmDeleteOpen = ref(false)
+const confirmBanOpen = ref(false)
 
 const LOGS_PER_PAGE = 15
 const logs = ref<LinkLogItem[]>([])
@@ -193,6 +194,25 @@ async function confirmSave() {
     toast.success('Link ayarları güncellendi.')
   } catch (err: any) {
     toast.error(err?.message ?? 'Link güncellenemedi.')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function confirmBanToggle() {
+  if (!link.value) return
+  const currentlyBlocked = link.value.securityStatus === 'blocked' || link.value.securityStatus === 'malicious'
+  saving.value = true
+  try {
+    const updated = await adminUpdateLink(link.value.id, {
+      securityStatus: currentlyBlocked ? 'safe' : 'blocked',
+      isActive: currentlyBlocked ? true : false
+    })
+    syncForm({ ...link.value, ...updated })
+    confirmBanOpen.value = false
+    toast.success(currentlyBlocked ? 'Link yasağı kaldırıldı ve erişime açıldı.' : 'Link yasaklandı ve erişime kapatıldı.')
+  } catch (err: any) {
+    toast.error(err?.message ?? 'İşlem başarısız.')
   } finally {
     saving.value = false
   }
@@ -398,6 +418,30 @@ onMounted(loadPage)
           </div>
 
           <div class="rounded-lg border-[1.5px] border-ink bg-card p-6 shadow-hard">
+            <h2 class="text-lg font-bold">Hızlı Moderasyon</h2>
+            <p class="mt-1.5 text-sm text-ink-2">
+              {{
+                link.securityStatus === 'blocked' || link.securityStatus === 'malicious'
+                  ? 'Bu link şu an güvenlik nedeniyle engelli ve kapalı.'
+                  : 'Zararlı veya kural dışı bir linki tek tıkla yasaklayıp kapatabilirsin.'
+              }}
+            </p>
+            <div class="mt-4">
+              <UiButton
+                :variant="link.securityStatus === 'blocked' || link.securityStatus === 'malicious' ? 'secondary' : 'primary'"
+                @click="confirmBanOpen = true"
+              >
+                <UiIcon name="ban" :size="15" />
+                {{
+                  link.securityStatus === 'blocked' || link.securityStatus === 'malicious'
+                    ? 'Yasağı Kaldır ve Aç'
+                    : 'Linki Yasakla ve Kapat'
+                }}
+              </UiButton>
+            </div>
+          </div>
+
+          <div class="rounded-lg border-[1.5px] border-ink bg-card p-6 shadow-hard">
             <h2 class="text-lg font-bold text-accent-dark">Linki sil</h2>
             <p class="mt-1.5 text-sm text-ink-2">
               Bu linki sildiğinde yönlendirme durur ve tüm tıklama kayıtları kalıcı olarak kaldırılır.
@@ -472,6 +516,23 @@ onMounted(loadPage)
         :loading="saving"
         @cancel="confirmSaveOpen = false"
         @confirm="confirmSave"
+      />
+
+      <!-- Hızlı Yasaklama Onay Modalı -->
+      <UiConfirmModal
+        :open="confirmBanOpen"
+        :title="link.securityStatus === 'blocked' || link.securityStatus === 'malicious' ? 'Link yasağını kaldır' : 'Linki yasakla ve kapat'"
+        :target-label="`${displayShortUrl} → ${link.target}`"
+        :description="
+          link.securityStatus === 'blocked' || link.securityStatus === 'malicious'
+            ? 'Link güvenlik durumu güvenli yapılacak ve tekrar yönlendirmeye açılacak.'
+            : 'Link güvenlik nedeniyle engellenecek ve erişime kapatılacak.'
+        "
+        :confirm-label="link.securityStatus === 'blocked' || link.securityStatus === 'malicious' ? 'Evet, yasağı kaldır' : 'Evet, yasakla'"
+        :variant="link.securityStatus === 'blocked' || link.securityStatus === 'malicious' ? 'primary' : 'danger'"
+        :loading="saving"
+        @cancel="confirmBanOpen = false"
+        @confirm="confirmBanToggle"
       />
 
       <!-- Silme Onay Modalı -->

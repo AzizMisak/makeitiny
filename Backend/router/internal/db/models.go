@@ -10,7 +10,7 @@ import (
 
 type Link struct {
 	ID                int64              `json:"id"`
-	UserID            int64              `json:"user_id"`
+	UserID            pgtype.Int8        `json:"user_id"`
 	Alias             string             `json:"alias"`
 	TargetUrl         string             `json:"target_url"`
 	PasswordHash      pgtype.Text        `json:"password_hash"`
@@ -28,11 +28,13 @@ type Link struct {
 	SecurityCheckedAt pgtype.Timestamptz `json:"security_checked_at"`
 	QrCodePath        string             `json:"qr_code_path"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	IsAnonymous       bool               `json:"is_anonymous"`
+	CreatedByIp       string             `json:"created_by_ip"`
 }
 
 type Log struct {
 	ID             int64              `json:"id"`
-	LinkID         int64              `json:"link_id"`
+	LinkID         pgtype.Int8        `json:"link_id"`
 	IpAddress      string             `json:"ip_address"`
 	UserAgent      string             `json:"user_agent"`
 	DeviceType     string             `json:"device_type"`
@@ -42,6 +44,41 @@ type Log struct {
 	AcceptLanguage string             `json:"accept_language"`
 	ClickedAt      pgtype.Timestamptz `json:"clicked_at"`
 	CountryCode    string             `json:"country_code"`
+	LinkAlias      string             `json:"link_alias"`
+	LinkPublicID   string             `json:"link_public_id"`
+	EventType      string             `json:"event_type"`
+}
+
+type Plan struct {
+	ID               int32              `json:"id"`
+	Slug             string             `json:"slug"`
+	Name             string             `json:"name"`
+	PriceMonthly     pgtype.Numeric     `json:"price_monthly"`
+	MaxLinks         int32              `json:"max_links"`
+	AllowCustomAlias bool               `json:"allow_custom_alias"`
+	AllowPassword    bool               `json:"allow_password"`
+	AllowQr          bool               `json:"allow_qr"`
+	AllowAds         bool               `json:"allow_ads"`
+	AnalyticsDays    int32              `json:"analytics_days"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type RefreshToken struct {
+	ID        int64              `json:"id"`
+	UserID    int64              `json:"user_id"`
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UserAgent string             `json:"user_agent"`
+	IpAddress string             `json:"ip_address"`
+}
+
+type Role struct {
+	ID          int32              `json:"id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type User struct {
@@ -54,4 +91,14 @@ type User struct {
 	PlanExpiresAt pgtype.Timestamptz `json:"plan_expires_at"`
 	IsActive      bool               `json:"is_active"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	PublicID      string             `json:"public_id"`
+	BanReason     string             `json:"ban_reason"`
+	BannedAt      pgtype.Timestamptz `json:"banned_at"`
+	BannedUntil   pgtype.Timestamptz `json:"banned_until"`
+}
+
+type UsersRole struct {
+	UserID     int64              `json:"user_id"`
+	RoleID     int32              `json:"role_id"`
+	AssignedAt pgtype.Timestamptz `json:"assigned_at"`
 }

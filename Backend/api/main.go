@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,8 +19,10 @@ import (
 	"makeitiny/api/internal/db"
 	"makeitiny/api/internal/gen"
 	"makeitiny/api/internal/handler"
+	"makeitiny/api/internal/qr"
 	"makeitiny/api/internal/repository"
 	"makeitiny/api/internal/service"
+	"makeitiny/api/internal/worker"
 )
 
 func main() {
@@ -40,9 +46,26 @@ func main() {
 		jwtSecret = "makeitiny-dev-secret-key-2026"
 	}
 
-	ctx := context.Background()
+	publicBaseURL := os.Getenv("PUBLIC_BASE_URL")
+	if publicBaseURL == "" {
+		publicBaseURL = "http://localhost"
+	}
 
-	pool, err := pgxpool.New(ctx, dbURL)
+	qrDir := os.Getenv("QR_STORAGE_DIR")
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	poolCfg, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		log.Fatalf("geçersiz DATABASE_URL: %v", err)
+	}
+	poolCfg.MaxConns = 20
+	poolCfg.MinConns = 2
+	poolCfg.MaxConnLifetime = 30 * time.Minute
+	poolCfg.MaxConnIdleTime = 5 * time.Minute
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		log.Fatalf("postgres bağlantı havuzu oluşturulamadı: %v", err)
 	}
@@ -72,12 +95,21 @@ func main() {
 		log.Printf("uyarı: redis ping başarısız (%v), servis çalışmaya devam ediyor", err)
 	}
 
+	qrStore, err := qr.NewStore(qrDir)
+	if err != nil {
+		log.Fatalf("qr depolama başlatılamadı: %v", err)
+	}
+
 	queries := db.New(pool)
-	userRepo := repository.NewUserRepository(queries, rdb)
-	linkRepo := repository.NewLinkRepository(queries, rdb)
+
+	syncWorker := worker.NewSyncWorker(pool, queries, rdb, qrStore)
+	syncWorker.Start(ctx)
+
+	userRepo := repository.NewUserRepository(queries, rdb, qrStore)
+	linkRepo := repository.NewLinkRepository(queries, rdb, qrStore)
 
 	authSvc := service.NewAuthService(userRepo, jwtSecret)
-	linkSvc := service.NewLinkService(linkRepo)
+	linkSvc := service.NewLinkService(linkRepo, qrStore, publicBaseURL)
 	h := handler.New(authSvc, linkSvc)
 
 	allowedOrigins := []string{
@@ -89,10 +121,24 @@ func main() {
 		"http://127.0.0.1",
 	}
 
-	handlerWithCORS := withCORS(gen.Handler(h), allowedOrigins)
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           withCORS(gen.HandlerFromMux(h, newPriorityMux()), allowedOrigins),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
-	log.Println("api listening on :" + port)
-	log.Fatal(http.ListenAndServe(":"+port, handlerWithCORS))
+	go func() {
+		log.Println("api listening on :" + port)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("api sunucu hatası: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("api kapanıyor, bekleyen işlemler boşaltılıyor...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(shutdownCtx)
 }
 
 func runMigrations(pool *pgxpool.Pool) {
@@ -146,4 +192,35 @@ func withCORS(next http.Handler, allowedOrigins []string) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// priorityMux, Go 1.22+ ServeMux'ta /links/{id}/qr ile /links/check-alias/{alias} ve /links/logs/{id}
+// arasındaki wildcard çakışmasını önlemek için QR rotalarını ayrı bir mux üzerinde tutar.
+type priorityMux struct {
+	mainMux *http.ServeMux
+	qrMux   *http.ServeMux
+}
+
+func newPriorityMux() *priorityMux {
+	return &priorityMux{
+		mainMux: http.NewServeMux(),
+		qrMux:   http.NewServeMux(),
+	}
+}
+
+func (p *priorityMux) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	if strings.HasSuffix(pattern, "/qr") {
+		p.qrMux.HandleFunc(pattern, handler)
+		return
+	}
+	p.mainMux.HandleFunc(pattern, handler)
+}
+
+func (p *priorityMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	segs := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(segs) == 3 && segs[0] == "links" && segs[2] == "qr" && segs[1] != "check-alias" && segs[1] != "logs" {
+		p.qrMux.ServeHTTP(w, r)
+		return
+	}
+	p.mainMux.ServeHTTP(w, r)
 }

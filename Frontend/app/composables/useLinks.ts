@@ -1,5 +1,7 @@
 import type {
   AliasCheckResult,
+  AnonymousLinkResponse,
+  CreateAnonymousLinkPayload,
   CreateLinkPayload,
   LinkItem,
   PaginatedLinksResponse,
@@ -76,6 +78,14 @@ export function useLinks() {
     return created
   }
 
+  async function createAnonymousLink(input: CreateAnonymousLinkPayload): Promise<AnonymousLinkResponse> {
+    const payload: CreateAnonymousLinkPayload = {
+      ...input,
+      target: normalizeTargetUrl(input.target)
+    }
+    return await useApi().post<AnonymousLinkResponse, CreateAnonymousLinkPayload>('/links/anonymous', payload)
+  }
+
   async function updateLink(id: string, input: UpdateLinkPayload) {
     const payload: UpdateLinkPayload = {
       ...input,
@@ -85,6 +95,19 @@ export function useLinks() {
     links.value = links.value.map((l) => (l.id === id ? updated : l))
     topLinks.value = topLinks.value.map((l) => (l.id === id ? updated : l))
     return updated
+  }
+
+  async function generateQr(id: string): Promise<LinkItem> {
+    const updated = await useApi().post<LinkItem>(`/links/${id}/qr`)
+    links.value = links.value.map((l) => (l.id === id ? updated : l))
+    topLinks.value = topLinks.value.map((l) => (l.id === id ? updated : l))
+    return updated
+  }
+
+  async function deleteQr(id: string): Promise<void> {
+    await useApi().del(`/links/${id}/qr`)
+    links.value = links.value.map((l) => (l.id === id ? { ...l, hasQr: false, qrUrl: '' } : l))
+    topLinks.value = topLinks.value.map((l) => (l.id === id ? { ...l, hasQr: false, qrUrl: '' } : l))
   }
 
   async function removeLink(id: string) {
@@ -123,7 +146,10 @@ export function useLinks() {
     getLinkLogs,
     checkAlias,
     addLink,
+    createAnonymousLink,
     updateLink,
+    generateQr,
+    deleteQr,
     removeLink,
     resetLinks
   }

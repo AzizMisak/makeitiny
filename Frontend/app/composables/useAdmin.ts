@@ -12,6 +12,8 @@ import type {
   PaginatedLogsResponse
 } from '~/types/link'
 
+export type AdminLinkStatusFilter = 'all' | 'active' | 'inactive' | 'blocked' | 'anonymous'
+
 export function useAdmin() {
   const usersCache = useState<Record<string, User>>('mit_admin_users_cache', () => ({}))
   const linksCache = useState<Record<string, AdminLinkItem>>('mit_admin_links_cache', () => ({}))
@@ -28,7 +30,7 @@ export function useAdmin() {
     page = 1,
     limit = 20,
     search = '',
-    status: 'all' | 'active' | 'inactive' | 'blocked' = 'all'
+    status: AdminLinkStatusFilter = 'all'
   ): Promise<AdminPaginatedLinksResponse> {
     const params = new URLSearchParams({
       page: String(page),
@@ -46,22 +48,13 @@ export function useAdmin() {
   }
 
   async function fetchAdminLinkById(id: string): Promise<AdminLinkItem | null> {
-    const cached = linksCache.value[id]
-    if (cached?.alias) {
-      const res = await fetchAdminLinks(1, 50, cached.alias, 'all')
-      const exact = res.items.find((item) => item.id === id)
-      if (exact) return exact
+    try {
+      const item = await useApi().get<AdminLinkItem>(`/admin/links/${id}`)
+      linksCache.value[item.id] = item
+      return item
+    } catch {
+      return linksCache.value[id] ?? null
     }
-
-    let currentPage = 1
-    while (currentPage <= 10) {
-      const res = await fetchAdminLinks(currentPage, 100, '', 'all')
-      const found = res.items.find((item) => item.id === id)
-      if (found) return found
-      if (currentPage >= res.totalPages) break
-      currentPage++
-    }
-    return cached ?? null
   }
 
   async function adminUpdateLink(id: string, payload: AdminUpdateLinkPayload): Promise<LinkItem> {
@@ -101,22 +94,13 @@ export function useAdmin() {
   }
 
   async function fetchAdminUserById(id: string): Promise<User | null> {
-    const cached = usersCache.value[id]
-    if (cached?.email) {
-      const res = await fetchAdminUsers(1, 50, cached.email)
-      const exact = res.items.find((u) => u.id === id)
-      if (exact) return exact
+    try {
+      const u = await useApi().get<User>(`/admin/users/${id}`)
+      usersCache.value[u.id] = u
+      return u
+    } catch {
+      return usersCache.value[id] ?? null
     }
-
-    let currentPage = 1
-    while (currentPage <= 10) {
-      const res = await fetchAdminUsers(currentPage, 100, '')
-      const found = res.items.find((u) => u.id === id)
-      if (found) return found
-      if (currentPage >= res.totalPages) break
-      currentPage++
-    }
-    return cached ?? null
   }
 
   async function fetchAdminUserLinks(userId: string, userEmail: string): Promise<AdminLinkItem[]> {

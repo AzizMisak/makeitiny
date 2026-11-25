@@ -34,6 +34,7 @@ async function copy() {
           <UiBadge v-if="link.locked" tone="accent"><UiIcon name="lock" :size="11" /> şifreli</UiBadge>
           <UiBadge v-else-if="link.waitEnabled" tone="neutral"><UiIcon name="clock" :size="11" /> {{ link.waitSeconds }} sn</UiBadge>
           <UiBadge v-if="link.adEnabled" tone="neutral">reklamlı</UiBadge>
+          <UiBadge v-if="link.hasQr" tone="ok"><UiIcon name="qr" :size="11" /> QR</UiBadge>
           <UiBadge v-if="link.expiresAt" tone="neutral">bitiş: {{ link.expiresAt }}</UiBadge>
           <UiBadge v-if="link.maxClicks" tone="neutral">{{ link.clicks }}/{{ link.maxClicks }} limit</UiBadge>
         </div>

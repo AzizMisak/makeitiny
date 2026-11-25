@@ -1,9 +1,9 @@
 <script setup lang="ts">
 const { isLoggedIn } = useAuth()
 
-function scrollToFeatures() {
+function scrollToSection(id: string) {
   if (!import.meta.client) return
-  const el = document.getElementById('ozellikler')
+  const el = document.getElementById(id)
   if (!el) return
   const top = Math.max(0, el.getBoundingClientRect().top + window.scrollY - 72)
   window.scrollTo({ top, behavior: 'smooth' })
@@ -12,7 +12,7 @@ function scrollToFeatures() {
 const highlights = [
   { label: 'Özel Alias / Base62', desc: 'Kendi takma adın veya 6 haneli kod' },
   { label: 'Argon2id & /w Modu', desc: 'Parola kilidi veya süreli bekletme' },
-  { label: 'Canlı Log & Grafik', desc: 'Cihaz, İS, tarayıcı ve ülke analizi' }
+  { label: 'QR Kod & Canlı Log', desc: 'Anında PNG QR ve cihaz/ülke analizi' }
 ]
 </script>
 
@@ -38,8 +38,8 @@ const highlights = [
 
         <p class="mt-6 max-w-xl text-base leading-relaxed text-ink-2 sm:text-lg">
           <strong class="font-semibold text-ink">makeiTiny</strong> ile uzun adresleri saniyeler içinde kısalt.
-          İster özel takma ad belirle, ister <strong class="font-semibold text-ink">Argon2id şifre koruması</strong> veya
-          <strong class="font-semibold text-ink">geri sayımlı bekletme sayfası (/w)</strong> ekle; her tıklamayı cihaz, tarayıcı, zaman grafiği ve coğrafi dağılımıyla izle.
+          İster üye olmadan <strong class="font-semibold text-ink">2 günlük geçici link</strong> oluştur, ister ücretsiz hesabınla
+          <strong class="font-semibold text-ink">Argon2id şifre koruması</strong>, QR kod ve canlı cihaz/coğrafya analizi kullan.
         </p>
 
         <div class="mt-8 flex flex-wrap items-center gap-3.5">
@@ -55,13 +55,15 @@ const highlights = [
             <UiButton to="/auth/register">
               Ücretsiz hesap aç <UiIcon name="arrow" :size="16" />
             </UiButton>
-            <UiButton to="/auth/login" variant="secondary">Giriş yap</UiButton>
+            <UiButton variant="secondary" @click="scrollToSection('hizli-kisalt')">
+              <UiIcon name="sparkle" :size="15" /> Üyeliksiz dene
+            </UiButton>
           </template>
 
           <button
             type="button"
-            class="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-ink-2 underline decoration-line decoration-2 underline-offset-4 transition-colors hover:text-ink hover:decoration-accent cursor-pointer"
-            @click="scrollToFeatures"
+            class="inline-flex cursor-pointer items-center gap-1.5 px-3 py-2 text-sm font-semibold text-ink-2 underline decoration-line decoration-2 underline-offset-4 transition-colors hover:text-ink hover:decoration-accent"
+            @click="scrollToSection('ozellikler')"
           >
             Özellikleri incele ↓
           </button>

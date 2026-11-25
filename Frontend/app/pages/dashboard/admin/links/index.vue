@@ -1,13 +1,12 @@
 <script setup lang="ts">
+import type { AdminLinkStatusFilter } from '~/composables/useAdmin'
 import type { AdminLinkItem, AdminStatsResponse } from '~/types/link'
 
 definePageMeta({ layout: 'dashboard', middleware: 'auth', roles: ['admin', 'owner'] })
 useHead({ title: 'Tüm Linkler — Yönetici — makeiTiny' })
 
-type StatusFilter = 'all' | 'active' | 'inactive' | 'blocked'
-
 const { public: config } = useRuntimeConfig()
-const { fetchAdminStats, fetchAdminLinks } = useAdmin()
+const { fetchAdminStats, fetchAdminLinks, adminUpdateLink } = useAdmin()
 const toast = useToast()
 
 const PAGE_SIZE = 15
@@ -21,17 +20,28 @@ const loading = ref(true)
 
 const searchInput = ref('')
 const activeSearch = ref('')
-const statusFilter = ref<StatusFilter>('all')
+const statusFilter = ref<AdminLinkStatusFilter>('all')
 
-const statusTabs: { value: StatusFilter; label: string }[] = [
+const pendingAction = ref<{
+  link: AdminLinkItem
+  kind: 'toggleActive' | 'toggleBlock'
+} | null>(null)
+const actionSaving = ref(false)
+
+const statusTabs: { value: AdminLinkStatusFilter; label: string }[] = [
   { value: 'all', label: 'Tümü' },
   { value: 'active', label: 'Aktif' },
   { value: 'inactive', label: 'Pasif' },
-  { value: 'blocked', label: 'Engelli / Zararlı' }
+  { value: 'blocked', label: 'Engelli / Zararlı' },
+  { value: 'anonymous', label: 'Anonim' }
 ]
 
 function displayShortUrl(alias: string): string {
   return `${config.routerBase}/${alias}`.replace(/^https?:\/\//, '')
+}
+
+function isLinkBlocked(item: AdminLinkItem): boolean {
+  return item.securityStatus === 'blocked' || item.securityStatus === 'malicious'
 }
 
 async function loadLinks(targetPage = page.value) {
@@ -64,11 +74,75 @@ function clearSearch() {
   loadLinks(1)
 }
 
-function selectStatus(status: StatusFilter) {
+function selectStatus(status: AdminLinkStatusFilter) {
   if (statusFilter.value === status) return
   statusFilter.value = status
   loadLinks(1)
 }
+
+function openQuickAction(link: AdminLinkItem, kind: 'toggleActive' | 'toggleBlock') {
+  pendingAction.value = { link, kind }
+}
+
+async function confirmQuickAction() {
+  const act = pendingAction.value
+  if (!act) return
+  actionSaving.value = true
+  try {
+    if (act.kind === 'toggleActive') {
+      const nextActive = !act.link.isActive
+      await adminUpdateLink(act.link.id, { isActive: nextActive })
+      toast.success(nextActive ? 'Link aktifleştirildi.' : 'Link erişime kapatıldı (pasif).')
+    } else {
+      const blocked = isLinkBlocked(act.link)
+      await adminUpdateLink(act.link.id, {
+        securityStatus: blocked ? 'safe' : 'blocked',
+        isActive: blocked ? true : false
+      })
+      toast.success(blocked ? 'Linkin engeli kaldırıldı.' : 'Link güvenlik nedeniyle yasaklandı ve kapatıldı.')
+    }
+    pendingAction.value = null
+    await loadLinks(page.value)
+  } catch (err: any) {
+    toast.error(err?.message ?? 'İşlem başarısız.')
+  } finally {
+    actionSaving.value = false
+  }
+}
+
+const modalMeta = computed(() => {
+  const act = pendingAction.value
+  if (!act) return { title: '', desc: '', confirm: '', variant: 'primary' as const }
+  if (act.kind === 'toggleActive') {
+    return act.link.isActive
+      ? {
+          title: 'Linki erişime kapat',
+          desc: 'Bu kısa link pasife alınacak ve ziyaretçiler hata ekranına yönlendirilecek.',
+          confirm: 'Evet, kapat',
+          variant: 'danger' as const
+        }
+      : {
+          title: 'Linki aktifleştir',
+          desc: 'Bu kısa link tekrar yönlendirmeye açılacak.',
+          confirm: 'Evet, aktifleştir',
+          variant: 'primary' as const
+        }
+  }
+  const blocked = isLinkBlocked(act.link)
+  return blocked
+    ? {
+        title: 'Link yasağını kaldır',
+        desc: 'Güvenlik durumu "Güvenli" olarak işaretlenecek ve link tekrar aktifleştirilecek.',
+        confirm: 'Yasağı kaldır',
+        variant: 'primary' as const
+      }
+    : {
+        title: 'Linki yasakla ve kapat',
+        desc: 'Bu kısa link güvenlik nedeniyle "Engelli" durumuna alınacak ve erişimi kapatılacak.',
+        confirm: 'Evet, yasakla',
+        variant: 'danger' as const
+      }
+})
 
 onMounted(() => loadLinks(1))
 </script>
@@ -76,7 +150,7 @@ onMounted(() => loadLinks(1))
 <template>
   <DashboardPageHeader
     title="Tüm linkler"
-    description="İncelemek veya müdahale etmek istediğin linkin üzerine tıkla."
+    description="Platformdaki tüm linkleri incele, kapat/aç veya güvenlik nedeniyle yasakla."
   >
     <template #actions>
       <UiButton variant="secondary" :disabled="loading" @click="loadLinks(page)">
@@ -150,49 +224,78 @@ onMounted(() => loadLinks(1))
     </div>
 
     <ul v-else class="divide-y divide-line">
-      <li v-for="item in links" :key="item.id">
-        <NuxtLink
-          :to="`/dashboard/admin/links/${item.id}`"
-          class="group flex flex-col gap-3 p-4 transition-colors hover:bg-paper/60 sm:flex-row sm:items-center sm:justify-between sm:p-5"
-        >
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="font-mono text-sm font-bold text-ink group-hover:text-accent group-hover:underline">
-                {{ displayShortUrl(item.alias) }}
-              </span>
-              <span v-if="item.title" class="truncate text-xs font-semibold text-ink-2">• {{ item.title }}</span>
-              <UiBadge :tone="item.isActive ? 'ok' : 'accent'">
-                {{ item.isActive ? 'Aktif' : 'Pasif' }}
-              </UiBadge>
-              <UiBadge :tone="securityStatusMeta(item.securityStatus).tone">
-                {{ securityStatusMeta(item.securityStatus).label }}
-              </UiBadge>
-              <UiBadge v-if="item.locked" tone="neutral"><UiIcon name="lock" :size="11" /> şifreli</UiBadge>
-              <UiBadge v-if="item.adEnabled" tone="neutral">reklamlı</UiBadge>
-            </div>
-
-            <p class="mt-1 truncate text-sm text-ink-3" :title="item.target">{{ item.target }}</p>
-
-            <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-ink-3">
-              <span>Sahip: <strong class="text-ink-2">{{ item.userName || item.userEmail }}</strong> ({{ item.userEmail }})</span>
-              <span>Tarih: {{ formatDateTr(item.createdAt) }}</span>
-              <span v-if="item.expiresAt">Bitiş: {{ formatDateTr(item.expiresAt) }}</span>
-              <span v-if="item.maxClicks">Limit: {{ item.clicks }}/{{ item.maxClicks }}</span>
-            </div>
+      <li
+        v-for="item in links"
+        :key="item.id"
+        class="flex flex-col gap-3 p-4 transition-colors hover:bg-paper/60 lg:flex-row lg:items-center lg:justify-between sm:p-5"
+      >
+        <NuxtLink :to="`/dashboard/admin/links/${item.id}`" class="group min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-mono text-sm font-bold text-ink group-hover:text-accent group-hover:underline">
+              {{ displayShortUrl(item.alias) }}
+            </span>
+            <span v-if="item.title" class="truncate text-xs font-semibold text-ink-2">• {{ item.title }}</span>
+            <UiBadge v-if="item.isAnonymous" tone="neutral">Anonim</UiBadge>
+            <UiBadge :tone="item.isActive ? 'ok' : 'accent'">
+              {{ item.isActive ? 'Aktif' : 'Pasif' }}
+            </UiBadge>
+            <UiBadge :tone="securityStatusMeta(item.securityStatus).tone">
+              {{ securityStatusMeta(item.securityStatus).label }}
+            </UiBadge>
+            <UiBadge v-if="item.locked" tone="neutral"><UiIcon name="lock" :size="11" /> şifreli</UiBadge>
+            <UiBadge v-if="item.hasQr" tone="ok"><UiIcon name="qr" :size="11" /> QR</UiBadge>
           </div>
 
-          <div class="flex shrink-0 items-center gap-4">
-            <div class="text-right">
-              <span class="block font-display text-lg font-bold leading-none text-ink">
-                {{ item.clicks.toLocaleString('tr-TR') }}
-              </span>
-              <span class="text-xs text-ink-3">tıklama</span>
-            </div>
-            <span class="inline-flex items-center gap-1 rounded-sm border border-line bg-paper px-2.5 py-1 text-xs font-semibold text-ink-2 transition-colors group-hover:border-ink group-hover:text-ink">
-              İncele <UiIcon name="arrow" :size="13" />
+          <p class="mt-1 truncate text-sm text-ink-3" :title="item.target">{{ item.target }}</p>
+
+          <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-ink-3">
+            <span>
+              Sahip:
+              <strong class="text-ink-2">{{ item.isAnonymous ? 'Üyeliksiz (Anonim)' : (item.userName || item.userEmail) }}</strong>
+              <template v-if="item.userEmail"> ({{ item.userEmail }})</template>
             </span>
+            <span>Tarih: {{ formatDateTr(item.createdAt) }}</span>
+            <span v-if="item.expiresAt">Bitiş: {{ formatDateTr(item.expiresAt) }}</span>
+            <span v-if="item.maxClicks">Limit: {{ item.clicks }}/{{ item.maxClicks }}</span>
           </div>
         </NuxtLink>
+
+        <div class="flex shrink-0 flex-wrap items-center gap-2">
+          <div class="mr-2 text-right">
+            <span class="block font-display text-lg font-bold leading-none text-ink">
+              {{ item.clicks.toLocaleString('tr-TR') }}
+            </span>
+            <span class="text-xs text-ink-3">tıklama</span>
+          </div>
+
+          <button
+            type="button"
+            class="cursor-pointer rounded-sm border border-line bg-paper px-2.5 py-1.5 text-xs font-semibold text-ink-2 transition-colors hover:border-ink hover:text-ink"
+            @click="openQuickAction(item, 'toggleActive')"
+          >
+            {{ item.isActive ? 'Kapat' : 'Aç' }}
+          </button>
+
+          <button
+            type="button"
+            class="cursor-pointer rounded-sm border px-2.5 py-1.5 text-xs font-semibold transition-colors"
+            :class="
+              isLinkBlocked(item)
+                ? 'border-ok bg-ok-soft text-ok hover:bg-card'
+                : 'border-accent-dark bg-accent-soft text-accent-dark hover:bg-accent hover:text-white'
+            "
+            @click="openQuickAction(item, 'toggleBlock')"
+          >
+            {{ isLinkBlocked(item) ? 'Yasağı Kaldır' : 'Yasakla' }}
+          </button>
+
+          <NuxtLink
+            :to="`/dashboard/admin/links/${item.id}`"
+            class="inline-flex items-center gap-1 rounded-sm border border-ink bg-card px-2.5 py-1.5 text-xs font-semibold text-ink hover:bg-paper-2"
+          >
+            İncele <UiIcon name="arrow" :size="13" />
+          </NuxtLink>
+        </div>
       </li>
     </ul>
   </div>
@@ -205,5 +308,17 @@ onMounted(() => loadLinks(1))
     :loading="loading"
     item-label="link"
     @change="loadLinks"
+  />
+
+  <UiConfirmModal
+    :open="!!pendingAction"
+    :title="modalMeta.title"
+    :target-label="pendingAction ? `${displayShortUrl(pendingAction.link.alias)} → ${pendingAction.link.target}` : ''"
+    :description="modalMeta.desc"
+    :confirm-label="modalMeta.confirm"
+    :variant="modalMeta.variant"
+    :loading="actionSaving"
+    @cancel="pendingAction = null"
+    @confirm="confirmQuickAction"
   />
 </template>

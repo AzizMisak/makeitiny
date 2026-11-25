@@ -61,10 +61,11 @@ func (e AdminUpdateRoleRequestRole) Valid() bool {
 
 // Defines values for AdminListLinksParamsStatus.
 const (
-	AdminListLinksParamsStatusActive   AdminListLinksParamsStatus = "active"
-	AdminListLinksParamsStatusAll      AdminListLinksParamsStatus = "all"
-	AdminListLinksParamsStatusBlocked  AdminListLinksParamsStatus = "blocked"
-	AdminListLinksParamsStatusInactive AdminListLinksParamsStatus = "inactive"
+	AdminListLinksParamsStatusActive    AdminListLinksParamsStatus = "active"
+	AdminListLinksParamsStatusAll       AdminListLinksParamsStatus = "all"
+	AdminListLinksParamsStatusAnonymous AdminListLinksParamsStatus = "anonymous"
+	AdminListLinksParamsStatusBlocked   AdminListLinksParamsStatus = "blocked"
+	AdminListLinksParamsStatusInactive  AdminListLinksParamsStatus = "inactive"
 )
 
 // Valid indicates whether the value is a known member of the AdminListLinksParamsStatus enum.
@@ -73,6 +74,8 @@ func (e AdminListLinksParamsStatus) Valid() bool {
 	case AdminListLinksParamsStatusActive:
 		return true
 	case AdminListLinksParamsStatusAll:
+		return true
+	case AdminListLinksParamsStatusAnonymous:
 		return true
 	case AdminListLinksParamsStatusBlocked:
 		return true
@@ -100,17 +103,26 @@ type AdminLinkItem struct {
 	// ExpiresAt Example: 2027-01-01
 	ExpiresAt *string `json:"expiresAt,omitempty"`
 
+	// HasQr Example: true
+	HasQr bool `json:"hasQr"`
+
 	// Id Example: k9Xm2pQ7vR4nL8wZ
 	Id string `json:"id"`
 
 	// IsActive Example: true
 	IsActive bool `json:"isActive"`
 
+	// IsAnonymous Example: false
+	IsAnonymous bool `json:"isAnonymous"`
+
 	// Locked Example: false
 	Locked bool `json:"locked"`
 
 	// MaxClicks Example: 5000
 	MaxClicks *int64 `json:"maxClicks,omitempty"`
+
+	// QrUrl Example: /api/links/k9Xm2pQ7vR4nL8wZ/qr
+	QrUrl string `json:"qrUrl"`
 
 	// SecurityStatus Example: unchecked
 	SecurityStatus string `json:"securityStatus"`
@@ -275,6 +287,14 @@ type AdminUpdateRoleRequestRole string
 
 // AdminUpdateUserRequest defines model for AdminUpdateUserRequest.
 type AdminUpdateUserRequest struct {
+	// BanReason Example: Spam ve zararlı link paylaşımı
+	BanReason *string `json:"banReason,omitempty"`
+
+	// BannedUntil ISO 8601 veya YYYY-MM-DD bitiş tarihi; boş string gönderilirse süresiz ban.
+	//
+	// Example: 2026-12-01
+	BannedUntil *string `json:"bannedUntil,omitempty"`
+
 	// IsActive Example: true
 	IsActive *bool `json:"isActive,omitempty"`
 
@@ -296,6 +316,39 @@ type AliasCheckResult struct {
 	Available bool `json:"available"`
 }
 
+// AnonymousLinkResponse defines model for AnonymousLinkResponse.
+type AnonymousLinkResponse struct {
+	// Alias Example: x7Kp2q
+	Alias string `json:"alias"`
+
+	// ExpiresAt Example: 2026-11-27T17:30:00Z
+	ExpiresAt string `json:"expiresAt"`
+
+	// HasQr Example: true
+	HasQr bool `json:"hasQr"`
+
+	// Id Example: k9Xm2pQ7vR4nL8wZ
+	Id string `json:"id"`
+
+	// Locked Example: false
+	Locked bool `json:"locked"`
+
+	// QrUrl Example: /api/links/k9Xm2pQ7vR4nL8wZ/qr
+	QrUrl string `json:"qrUrl"`
+
+	// ShortUrl Example: http://localhost/r/x7Kp2q
+	ShortUrl string `json:"shortUrl"`
+
+	// Target Example: https://example.com/gecici
+	Target string `json:"target"`
+
+	// WaitEnabled Example: false
+	WaitEnabled bool `json:"waitEnabled"`
+
+	// WaitSeconds Example: 0
+	WaitSeconds int32 `json:"waitSeconds"`
+}
+
 // ApiError defines model for ApiError.
 type ApiError struct {
 	// Code Example: invalid_request
@@ -313,6 +366,24 @@ type AuthResponse struct {
 	// Token Example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 	Token string `json:"token"`
 	User  User   `json:"user"`
+}
+
+// CreateAnonymousLinkRequest defines model for CreateAnonymousLinkRequest.
+type CreateAnonymousLinkRequest struct {
+	// Password Example: gizli123
+	Password *string `json:"password,omitempty"`
+
+	// Target Example: https://example.com/gecici
+	Target string `json:"target"`
+
+	// TtlHours Example: 48
+	TtlHours *int32 `json:"ttlHours,omitempty"`
+
+	// WaitEnabled Example: false
+	WaitEnabled *bool `json:"waitEnabled,omitempty"`
+
+	// WaitSeconds Example: 5
+	WaitSeconds *int32 `json:"waitSeconds,omitempty"`
 }
 
 // CreateLinkRequest defines model for CreateLinkRequest.
@@ -364,17 +435,26 @@ type LinkItem struct {
 	// ExpiresAt Example: 2027-01-01
 	ExpiresAt *string `json:"expiresAt,omitempty"`
 
+	// HasQr Example: true
+	HasQr bool `json:"hasQr"`
+
 	// Id Example: k9Xm2pQ7vR4nL8wZ
 	Id string `json:"id"`
 
 	// IsActive Example: true
 	IsActive bool `json:"isActive"`
 
+	// IsAnonymous Example: false
+	IsAnonymous bool `json:"isAnonymous"`
+
 	// Locked Example: false
 	Locked bool `json:"locked"`
 
 	// MaxClicks Example: 5000
 	MaxClicks *int64 `json:"maxClicks,omitempty"`
+
+	// QrUrl Example: /api/links/k9Xm2pQ7vR4nL8wZ/qr
+	QrUrl string `json:"qrUrl"`
 
 	// SecurityStatus Example: unchecked
 	SecurityStatus string `json:"securityStatus"`
@@ -517,6 +597,12 @@ type PlanItem struct {
 	Slug string `json:"slug"`
 }
 
+// RefreshTokenRequest defines model for RefreshTokenRequest.
+type RefreshTokenRequest struct {
+	// RefreshToken Example: optional_refresh_token_if_not_cookie
+	RefreshToken *string `json:"refreshToken,omitempty"`
+}
+
 // RegisterRequest defines model for RegisterRequest.
 type RegisterRequest struct {
 	// Email Example: aziz@makeitiny.com
@@ -579,13 +665,19 @@ type UpdateLinkRequest struct {
 
 // User defines model for User.
 type User struct {
+	// BanReason Example:
+	BanReason string `json:"banReason"`
+
+	// BannedUntil Example: 2026-12-01T23:59:59Z
+	BannedUntil *string `json:"bannedUntil,omitempty"`
+
 	// CreatedAt Example: 2026-11-14
 	CreatedAt string `json:"createdAt"`
 
 	// Email Example: aziz@makeitiny.com
 	Email openapi_types.Email `json:"email"`
 
-	// Id Example: 1
+	// Id Example: aB3xK9mZpQ2vL7nR
 	Id string `json:"id"`
 
 	// IsActive Example: true
@@ -641,6 +733,11 @@ type ListLinkLogsParams struct {
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetLinkQrParams defines parameters for GetLinkQr.
+type GetLinkQrParams struct {
+	Download *string `form:"download,omitempty" json:"download,omitempty"`
+}
+
 // AdminUpdateLinkJSONRequestBody defines body for AdminUpdateLink for application/json ContentType.
 type AdminUpdateLinkJSONRequestBody = AdminUpdateLinkRequest
 
@@ -656,6 +753,9 @@ type AdminUpdateUserJSONRequestBody = AdminUpdateUserRequest
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
+// RefreshTokenJSONRequestBody defines body for RefreshToken for application/json ContentType.
+type RefreshTokenJSONRequestBody = RefreshTokenRequest
+
 // RegisterJSONRequestBody defines body for Register for application/json ContentType.
 type RegisterJSONRequestBody = RegisterRequest
 
@@ -664,6 +764,9 @@ type ResetPasswordJSONRequestBody = ResetPasswordRequest
 
 // CreateLinkJSONRequestBody defines body for CreateLink for application/json ContentType.
 type CreateLinkJSONRequestBody = CreateLinkRequest
+
+// CreateAnonymousLinkJSONRequestBody defines body for CreateAnonymousLink for application/json ContentType.
+type CreateAnonymousLinkJSONRequestBody = CreateAnonymousLinkRequest
 
 // UpdateLinkJSONRequestBody defines body for UpdateLink for application/json ContentType.
 type UpdateLinkJSONRequestBody = UpdateLinkRequest
@@ -679,6 +782,9 @@ type ServerInterface interface {
 	// AdminDeleteLink Herhangi bir linki sistemden sil (admin/owner)
 	// (DELETE /admin/links/{id})
 	AdminDeleteLink(w http.ResponseWriter, r *http.Request, id string)
+	// AdminGetLink Tek bir linkin yönetici detayını getir (admin/owner)
+	// (GET /admin/links/{id})
+	AdminGetLink(w http.ResponseWriter, r *http.Request, id string)
 	// AdminUpdateLink Herhangi bir linke müdahale et / düzenle (admin/owner)
 	// (PATCH /admin/links/{id})
 	AdminUpdateLink(w http.ResponseWriter, r *http.Request, id string)
@@ -694,6 +800,9 @@ type ServerInterface interface {
 	// AdminListUsers Sistemdeki tüm kullanıcıları filtreli ve sayfalı olarak listele (admin/owner)
 	// (GET /admin/users)
 	AdminListUsers(w http.ResponseWriter, r *http.Request, params AdminListUsersParams)
+	// AdminGetUser Tek bir kullanıcının yönetici detayını getir (admin/owner)
+	// (GET /admin/users/{id})
+	AdminGetUser(w http.ResponseWriter, r *http.Request, id string)
 	// AdminUpdateUser Kullanıcının aktiflik durumunu (ban) veya paketini güncelle (admin/owner)
 	// (PATCH /admin/users/{id})
 	AdminUpdateUser(w http.ResponseWriter, r *http.Request, id string)
@@ -703,6 +812,9 @@ type ServerInterface interface {
 	// Logout Oturumu sonlandır
 	// (POST /auth/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
+	// RefreshToken Refresh token kullanarak yeni kısa ömürlü Access JWT al (token rotasyonu)
+	// (POST /auth/refresh)
+	RefreshToken(w http.ResponseWriter, r *http.Request)
 	// Register Yeni kullanıcı kaydı oluştur
 	// (POST /auth/register)
 	Register(w http.ResponseWriter, r *http.Request)
@@ -724,6 +836,9 @@ type ServerInterface interface {
 	// CreateLink Yeni kısa link oluştur
 	// (POST /links)
 	CreateLink(w http.ResponseWriter, r *http.Request)
+	// CreateAnonymousLink Üyeliksiz geçici kısa link oluştur (maksimum 2 gün, IP başına günde 1 adet)
+	// (POST /links/anonymous)
+	CreateAnonymousLink(w http.ResponseWriter, r *http.Request)
 	// CheckAlias Özel takma ad (custom alias) müsait mi kontrol et
 	// (GET /links/check-alias/{alias})
 	CheckAlias(w http.ResponseWriter, r *http.Request, alias string)
@@ -739,6 +854,15 @@ type ServerInterface interface {
 	// UpdateLink Mevcut bir linki düzenle
 	// (PATCH /links/{id})
 	UpdateLink(w http.ResponseWriter, r *http.Request, id string)
+	// DeleteLinkQr Linke ait QR kod görselini sil
+	// (DELETE /links/{id}/qr)
+	DeleteLinkQr(w http.ResponseWriter, r *http.Request, id string)
+	// GetLinkQr Linke ait QR kod PNG görselini getir (?download=1 ile indirme)
+	// (GET /links/{id}/qr)
+	GetLinkQr(w http.ResponseWriter, r *http.Request, id string, params GetLinkQrParams)
+	// GenerateLinkQr Link için QR kod görseli oluştur veya yeniden üret
+	// (POST /links/{id}/qr)
+	GenerateLinkQr(w http.ResponseWriter, r *http.Request, id string)
 	// ListPlans Sistemdeki tüm üyelik paketlerini ve limitlerini listele
 	// (GET /plans)
 	ListPlans(w http.ResponseWriter, r *http.Request)
@@ -906,6 +1030,32 @@ func (siw *ServerInterfaceWrapper) AdminDeleteLink(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// AdminGetLink operation middleware
+func (siw *ServerInterfaceWrapper) AdminGetLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminGetLink(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AdminUpdateLink operation middleware
 func (siw *ServerInterfaceWrapper) AdminUpdateLink(w http.ResponseWriter, r *http.Request) {
 
@@ -1057,6 +1207,32 @@ func (siw *ServerInterfaceWrapper) AdminListUsers(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// AdminGetUser operation middleware
+func (siw *ServerInterfaceWrapper) AdminGetUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminGetUser(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AdminUpdateUser operation middleware
 func (siw *ServerInterfaceWrapper) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 
@@ -1102,6 +1278,20 @@ func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshToken operation middleware
+func (siw *ServerInterfaceWrapper) RefreshToken(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshToken(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1232,6 +1422,20 @@ func (siw *ServerInterfaceWrapper) CreateLink(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateLink(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateAnonymousLink operation middleware
+func (siw *ServerInterfaceWrapper) CreateAnonymousLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateAnonymousLink(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1400,6 +1604,100 @@ func (siw *ServerInterfaceWrapper) UpdateLink(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteLinkQr operation middleware
+func (siw *ServerInterfaceWrapper) DeleteLinkQr(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteLinkQr(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLinkQr operation middleware
+func (siw *ServerInterfaceWrapper) GetLinkQr(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetLinkQrParams
+
+	// ------------- Optional query parameter "download" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "download", r.URL.Query(), &params.Download, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "download"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "download", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLinkQr(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GenerateLinkQr operation middleware
+func (siw *ServerInterfaceWrapper) GenerateLinkQr(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GenerateLinkQr(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListPlans operation middleware
 func (siw *ServerInterfaceWrapper) ListPlans(w http.ResponseWriter, r *http.Request) {
 
@@ -1539,22 +1837,29 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/register", wrapper.Register)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/login", wrapper.Login)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/logout", wrapper.Logout)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/refresh", wrapper.RefreshToken)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/resetpass", wrapper.ResetPassword)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/auth/user", wrapper.DeleteUser)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/user", wrapper.GetCurrentUser)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links", wrapper.ListLinks)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/links", wrapper.CreateLink)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/links/anonymous", wrapper.CreateAnonymousLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links/check-alias/{alias}", wrapper.CheckAlias)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/links/{id}", wrapper.DeleteLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links/{id}", wrapper.GetLink)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/links/{id}", wrapper.UpdateLink)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/links/{id}/qr", wrapper.DeleteLinkQr)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links/{id}/qr", wrapper.GetLinkQr)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/links/{id}/qr", wrapper.GenerateLinkQr)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links/logs/{id}", wrapper.ListLinkLogs)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/stats", wrapper.AdminGetStats)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/links", wrapper.AdminListLinks)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/admin/links/{id}", wrapper.AdminDeleteLink)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/links/{id}", wrapper.AdminGetLink)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/admin/links/{id}", wrapper.AdminUpdateLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/link-logs/{id}", wrapper.AdminListLinkLogs)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/users", wrapper.AdminListUsers)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/users/{id}", wrapper.AdminGetUser)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/admin/users/{id}", wrapper.AdminUpdateUser)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/admin/user-role/{id}", wrapper.AdminUpdateUserRole)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/admin/plans/{id}", wrapper.AdminUpdatePlan)

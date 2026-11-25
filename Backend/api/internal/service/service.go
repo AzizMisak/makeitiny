@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/url"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 
 	"makeitiny/api/internal/auth"
 	"makeitiny/api/internal/db"
+	"makeitiny/api/internal/qr"
 	"makeitiny/api/internal/repository"
 )
 
@@ -30,15 +32,19 @@ var (
 	ErrPasswordTooShort   = errors.New("parola en az 4 karakter olmalıdır")
 	ErrInvalidInput       = errors.New("geçersiz istek verisi")
 	ErrPlanNotFound       = errors.New("üyelik paketi bulunamadı")
+	ErrInvalidToken       = errors.New("geçersiz veya süresi dolmuş oturum")
 
 	ErrAliasTaken                = errors.New("seçilen takma ad (alias) zaten kullanımda")
 	ErrInvalidAlias              = errors.New("takma ad 3-32 karakter olmalı ve yalnızca harf, rakam, tire (-) veya alt çizgi (_) içermelidir")
 	ErrInvalidTargetURL          = errors.New("geçerli bir hedef web adresi giriniz (örn. ornek.com)")
 	ErrInvalidWaitSeconds        = errors.New("bekletme açıkken bekleme süresi en az 1 saniye olmalıdır")
 	ErrLinkNotFound              = errors.New("link bulunamadı")
+	ErrQRNotFound                = errors.New("QR kod görseli bulunamadı")
+	ErrAnonRateLimited           = errors.New("günde yalnızca 1 adet anonim kısa link oluşturabilirsiniz; daha fazlası için ücretsiz hesap açın")
 	ErrPlanLinkLimitReached      = errors.New("paketinizin maksimum link oluşturma sınırına ulaştınız")
 	ErrPlanCustomAliasRestricted = errors.New("özel takma ad (custom alias) belirlemek için paketinizi yükseltmelisiniz")
 	ErrPlanPasswordRestricted    = errors.New("şifreli link oluşturmak için paketinizi yükseltmelisiniz")
+	ErrPlanQRRestricted          = errors.New("QR kod oluşturmak için paketinizi yükseltmelisiniz")
 	ErrPlanAdsRestricted         = errors.New("reklam/gelir özelliğini kullanmak için paketinizi yükseltmelisiniz")
 )
 
@@ -51,11 +57,39 @@ const (
 
 var aliasRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,32}$`)
 
+type PlanInfo struct {
+	ID               int32
+	Slug             string
+	Name             string
+	PriceMonthly     float64
+	MaxLinks         int32
+	AllowCustomAlias bool
+	AllowPassword    bool
+	AllowQr          bool
+	AllowAds         bool
+	AnalyticsDays    int32
+}
+
 type UserProfile struct {
 	User      db.User
 	Roles     []string
-	Plan      db.Plan
+	Plan      PlanInfo
 	LinkCount int64
+}
+
+func planFromRow(id int32, slug, name string, price float64, maxLinks int32, customAlias, password, qrAllow, ads bool, days int32) PlanInfo {
+	return PlanInfo{
+		ID:               id,
+		Slug:             slug,
+		Name:             name,
+		PriceMonthly:     price,
+		MaxLinks:         maxLinks,
+		AllowCustomAlias: customAlias,
+		AllowPassword:    password,
+		AllowQr:          qrAllow,
+		AllowAds:         ads,
+		AnalyticsDays:    days,
+	}
 }
 
 func HasAnyRole(userRoles []string, allowed ...string) bool {
@@ -73,7 +107,7 @@ func IsPrivileged(userRoles []string) bool {
 	return HasAnyRole(userRoles, "admin", "owner")
 }
 
-// AuthService kimlik doğrulama, yetkilendirme ve kullanıcı/paket yönetimi iş mantığı.
+// AuthService kimlik doğrulama, yetkilendirme, ban yönetimi ve token rotasyonu iş mantığı.
 type AuthService struct {
 	users     *repository.UserRepository
 	jwtSecret string
@@ -104,9 +138,10 @@ func (s *AuthService) BuildUserProfile(ctx context.Context, user db.User) (UserP
 		effectivePlanID = 1
 	}
 
-	plan, err := s.users.GetPlanByID(ctx, effectivePlanID)
+	var plan PlanInfo
+	pRow, err := s.users.GetPlanByID(ctx, effectivePlanID)
 	if err != nil {
-		plan = db.Plan{
+		plan = PlanInfo{
 			ID:               1,
 			Slug:             "free",
 			Name:             "Ücretsiz Paket",
@@ -118,6 +153,8 @@ func (s *AuthService) BuildUserProfile(ctx context.Context, user db.User) (UserP
 			AllowAds:         false,
 			AnalyticsDays:    7,
 		}
+	} else {
+		plan = planFromRow(pRow.ID, pRow.Slug, pRow.Name, pRow.PriceMonthly, pRow.MaxLinks, pRow.AllowCustomAlias, pRow.AllowPassword, pRow.AllowQr, pRow.AllowAds, pRow.AnalyticsDays)
 	}
 
 	linkCount, _ := s.users.CountLinks(ctx, user.ID)
@@ -130,11 +167,66 @@ func (s *AuthService) BuildUserProfile(ctx context.Context, user db.User) (UserP
 	}, nil
 }
 
-// Authorize gelen JWT token'ı doğrular, kullanıcının aktifliğini ve (varsa) gereken rolleri kontrol eder.
+func formatBanMessage(u db.User) error {
+	msg := "Hesabınız askıya alınmıştır"
+	if u.BanReason != "" {
+		msg += " (Sebep: " + u.BanReason + ")"
+	}
+	if u.BannedUntil.Valid {
+		msg += " — Bitiş: " + u.BannedUntil.Time.Local().Format("02.01.2006 15:04")
+	} else {
+		msg += " — Süresiz"
+	}
+	return fmt.Errorf("%w: %s", ErrUserSuspended, msg)
+}
+
+func (s *AuthService) checkAndAutoUnban(ctx context.Context, user db.User) (db.User, error) {
+	if user.IsActive {
+		return user, nil
+	}
+	if user.BannedUntil.Valid && time.Now().After(user.BannedUntil.Time) {
+		unbanned, err := s.users.UnbanUser(ctx, user.ID)
+		if err == nil {
+			return unbanned, nil
+		}
+	}
+	return user, formatBanMessage(user)
+}
+
+func (s *AuthService) issueSessionTokens(ctx context.Context, user db.User, roles []string, userAgent, ip string) (accessToken string, refreshToken string, err error) {
+	accessToken, err = auth.GenerateToken(s.jwtSecret, user.ID, user.PublicID, user.Email, roles)
+	if err != nil {
+		return "", "", err
+	}
+
+	rawRefresh, hashRefresh, err := auth.GenerateRefreshToken()
+	if err != nil {
+		return "", "", err
+	}
+
+	_, err = s.users.CreateRefreshToken(ctx, db.CreateRefreshTokenParams{
+		UserID:    user.ID,
+		TokenHash: hashRefresh,
+		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(auth.RefreshTokenTTL), Valid: true},
+		UserAgent: userAgent,
+		IpAddress: ip,
+	})
+	if err != nil {
+		return "", "", err
+	}
+
+	return accessToken, rawRefresh, nil
+}
+
+// Authorize gelen JWT token'ı doğrular, JTI/kullanıcı iptali, ban durumu ve gereken rolleri kontrol eder.
 func (s *AuthService) Authorize(ctx context.Context, tokenStr string, requiredRoles ...string) (UserProfile, error) {
 	claims, err := s.VerifyToken(tokenStr)
 	if err != nil {
 		return UserProfile{}, err
+	}
+
+	if claims.ID != "" && s.users.IsJTIBlacklisted(ctx, claims.ID) {
+		return UserProfile{}, ErrInvalidToken
 	}
 
 	user, err := s.users.GetByID(ctx, claims.UserID)
@@ -145,8 +237,19 @@ func (s *AuthService) Authorize(ctx context.Context, tokenStr string, requiredRo
 		return UserProfile{}, err
 	}
 
-	if !user.IsActive {
-		return UserProfile{}, ErrUserSuspended
+	user, err = s.checkAndAutoUnban(ctx, user)
+	if err != nil {
+		return UserProfile{}, err
+	}
+
+	if revokedBefore := s.users.GetUserRevokedBefore(ctx, claims.UserID); revokedBefore > 0 {
+		issuedNs := claims.IssuedAtNano
+		if issuedNs == 0 && claims.IssuedAt != nil {
+			issuedNs = claims.IssuedAt.Time.UnixNano()
+		}
+		if issuedNs <= revokedBefore {
+			return UserProfile{}, ErrInvalidToken
+		}
 	}
 
 	profile, err := s.BuildUserProfile(ctx, user)
@@ -161,13 +264,13 @@ func (s *AuthService) Authorize(ctx context.Context, tokenStr string, requiredRo
 	return profile, nil
 }
 
-func (s *AuthService) Register(ctx context.Context, name *string, email, password string) (string, UserProfile, error) {
+func (s *AuthService) Register(ctx context.Context, name *string, email, password, userAgent, ip string) (string, string, UserProfile, error) {
 	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
 	if !strings.Contains(normalizedEmail, "@") {
-		return "", UserProfile{}, ErrInvalidEmail
+		return "", "", UserProfile{}, ErrInvalidEmail
 	}
 	if len(password) < 4 {
-		return "", UserProfile{}, ErrPasswordTooShort
+		return "", "", UserProfile{}, ErrPasswordTooShort
 	}
 
 	userName := ""
@@ -182,81 +285,171 @@ func (s *AuthService) Register(ctx context.Context, name *string, email, passwor
 	}
 
 	if _, err := s.users.GetByEmail(ctx, normalizedEmail); err == nil {
-		return "", UserProfile{}, ErrEmailTaken
+		return "", "", UserProfile{}, ErrEmailTaken
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return "", UserProfile{}, err
+		return "", "", UserProfile{}, err
 	}
 
 	hash, err := auth.HashPassword(password)
 	if err != nil {
-		return "", UserProfile{}, err
+		return "", "", UserProfile{}, err
 	}
 
-	user, err := s.users.Create(ctx, userName, normalizedEmail, hash)
-	if err != nil {
+	var user db.User
+	for i := 0; i < maxAliasCollision; i++ {
+		publicID, err := generateBase62(defaultPublicIDLen)
+		if err != nil {
+			return "", "", UserProfile{}, err
+		}
+		user, err = s.users.Create(ctx, publicID, userName, normalizedEmail, hash)
+		if err == nil {
+			break
+		}
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return "", UserProfile{}, ErrEmailTaken
+			if strings.Contains(pgErr.ConstraintName, "email") {
+				return "", "", UserProfile{}, ErrEmailTaken
+			}
+			continue
 		}
-		return "", UserProfile{}, err
+		return "", "", UserProfile{}, err
+	}
+	if user.ID == 0 {
+		return "", "", UserProfile{}, errors.New("kullanıcı oluşturulamadı")
 	}
 
 	profile, err := s.BuildUserProfile(ctx, user)
 	if err != nil {
-		return "", UserProfile{}, err
+		return "", "", UserProfile{}, err
 	}
 
-	token, err := auth.GenerateToken(s.jwtSecret, user.ID, user.Email, profile.Roles)
+	accessToken, refreshToken, err := s.issueSessionTokens(ctx, user, profile.Roles, userAgent, ip)
 	if err != nil {
-		return "", UserProfile{}, err
+		return "", "", UserProfile{}, err
 	}
 
-	return token, profile, nil
+	return accessToken, refreshToken, profile, nil
 }
 
-func (s *AuthService) Login(ctx context.Context, email, password string) (string, UserProfile, error) {
+func (s *AuthService) Login(ctx context.Context, email, password, userAgent, ip string) (string, string, UserProfile, error) {
 	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
 	if normalizedEmail == "" || password == "" {
-		return "", UserProfile{}, ErrInvalidInput
+		return "", "", UserProfile{}, ErrInvalidInput
 	}
 
 	user, err := s.users.GetByEmail(ctx, normalizedEmail)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", UserProfile{}, ErrInvalidCredentials
+			return "", "", UserProfile{}, ErrInvalidCredentials
 		}
-		return "", UserProfile{}, err
+		return "", "", UserProfile{}, err
 	}
 
 	ok, err := auth.VerifyPassword(password, user.PasswordHash)
 	if err != nil || !ok {
-		return "", UserProfile{}, ErrInvalidCredentials
+		return "", "", UserProfile{}, ErrInvalidCredentials
 	}
 
-	if !user.IsActive {
-		return "", UserProfile{}, ErrUserSuspended
+	user, err = s.checkAndAutoUnban(ctx, user)
+	if err != nil {
+		return "", "", UserProfile{}, err
 	}
 
 	profile, err := s.BuildUserProfile(ctx, user)
 	if err != nil {
-		return "", UserProfile{}, err
+		return "", "", UserProfile{}, err
 	}
 
-	token, err := auth.GenerateToken(s.jwtSecret, user.ID, user.Email, profile.Roles)
+	accessToken, refreshToken, err := s.issueSessionTokens(ctx, user, profile.Roles, userAgent, ip)
 	if err != nil {
-		return "", UserProfile{}, err
+		return "", "", UserProfile{}, err
 	}
 
-	return token, profile, nil
+	return accessToken, refreshToken, profile, nil
 }
 
-func (s *AuthService) ResetPassword(ctx context.Context, email, newPassword string) error {
+// RefreshSession refresh token rotasyonu uygular; iptal edilmiş token tekrar kullanılırsa tüm oturumları kapatır.
+func (s *AuthService) RefreshSession(ctx context.Context, rawRefreshToken, userAgent, ip string) (string, string, UserProfile, error) {
+	if strings.TrimSpace(rawRefreshToken) == "" {
+		return "", "", UserProfile{}, ErrInvalidToken
+	}
+
+	hash := auth.HashRefreshToken(rawRefreshToken)
+	rt, err := s.users.GetRefreshTokenByHash(ctx, hash)
+	if err != nil {
+		return "", "", UserProfile{}, ErrInvalidToken
+	}
+
+	if rt.RevokedAt.Valid {
+		// Token replay detection: daha önce kullanılmış token tekrar gönderildi -> tüm oturumları iptal et!
+		_ = s.users.RevokeAllUserRefreshTokens(ctx, rt.UserID)
+		s.users.RevokeUserTokensBefore(ctx, rt.UserID)
+		return "", "", UserProfile{}, ErrInvalidToken
+	}
+
+	if !rt.ExpiresAt.Valid || time.Now().After(rt.ExpiresAt.Time) {
+		return "", "", UserProfile{}, ErrInvalidToken
+	}
+
+	user, err := s.users.GetByID(ctx, rt.UserID)
+	if err != nil {
+		return "", "", UserProfile{}, ErrInvalidToken
+	}
+
+	user, err = s.checkAndAutoUnban(ctx, user)
+	if err != nil {
+		return "", "", UserProfile{}, err
+	}
+
+	_ = s.users.RevokeRefreshTokenByHash(ctx, hash)
+
+	profile, err := s.BuildUserProfile(ctx, user)
+	if err != nil {
+		return "", "", UserProfile{}, err
+	}
+
+	accessToken, newRefresh, err := s.issueSessionTokens(ctx, user, profile.Roles, userAgent, ip)
+	if err != nil {
+		return "", "", UserProfile{}, err
+	}
+
+	return accessToken, newRefresh, profile, nil
+}
+
+func (s *AuthService) Logout(ctx context.Context, tokenStr, rawRefreshToken string) {
+	if claims, err := s.VerifyToken(tokenStr); err == nil && claims.ID != "" {
+		ttl := 15 * time.Minute
+		if claims.ExpiresAt != nil {
+			if rem := time.Until(claims.ExpiresAt.Time); rem > 0 {
+				ttl = rem
+			}
+		}
+		s.users.BlacklistJTI(ctx, claims.ID, ttl)
+	}
+	if strings.TrimSpace(rawRefreshToken) != "" {
+		_ = s.users.RevokeRefreshTokenByHash(ctx, auth.HashRefreshToken(rawRefreshToken))
+	}
+}
+
+func (s *AuthService) ResetPassword(ctx context.Context, actor UserProfile, email, newPassword string) error {
 	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
 	if !strings.Contains(normalizedEmail, "@") {
 		return ErrInvalidEmail
 	}
 	if len(newPassword) < 4 {
 		return ErrPasswordTooShort
+	}
+
+	if actor.User.Email != normalizedEmail && !IsPrivileged(actor.Roles) {
+		return ErrForbidden
+	}
+
+	targetUser, err := s.users.GetByEmail(ctx, normalizedEmail)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		return err
 	}
 
 	hash, err := auth.HashPassword(newPassword)
@@ -271,6 +464,9 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, newPassword stri
 	if rows == 0 {
 		return ErrUserNotFound
 	}
+
+	_ = s.users.RevokeAllUserRefreshTokens(ctx, targetUser.ID)
+	s.users.RevokeUserTokensBefore(ctx, targetUser.ID)
 	return nil
 }
 
@@ -290,11 +486,54 @@ func (s *AuthService) DeleteUser(ctx context.Context, userID int64) error {
 	return nil
 }
 
-func (s *AuthService) ListPlans(ctx context.Context) ([]db.Plan, error) {
-	return s.users.ListPlans(ctx)
+func (s *AuthService) ListPlans(ctx context.Context) ([]PlanInfo, error) {
+	rows, err := s.users.ListPlans(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PlanInfo, 0, len(rows))
+	for _, p := range rows {
+		out = append(out, planFromRow(p.ID, p.Slug, p.Name, p.PriceMonthly, p.MaxLinks, p.AllowCustomAlias, p.AllowPassword, p.AllowQr, p.AllowAds, p.AnalyticsDays))
+	}
+	return out, nil
 }
 
 // --- Admin User & Plan Management ---
+
+func (s *AuthService) resolveTargetUser(ctx context.Context, idStr string) (db.User, error) {
+	clean := strings.TrimSpace(idStr)
+	if clean == "" {
+		return db.User{}, ErrUserNotFound
+	}
+
+	user, err := s.users.GetByPublicID(ctx, clean)
+	if err == nil {
+		return user, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.User{}, err
+	}
+
+	if numID, parseErr := strconv.ParseInt(clean, 10, 64); parseErr == nil {
+		u2, err2 := s.users.GetByID(ctx, numID)
+		if err2 == nil {
+			return u2, nil
+		}
+		if !errors.Is(err2, pgx.ErrNoRows) {
+			return db.User{}, err2
+		}
+	}
+
+	return db.User{}, ErrUserNotFound
+}
+
+func (s *AuthService) AdminGetUser(ctx context.Context, targetIDStr string) (UserProfile, error) {
+	targetUser, err := s.resolveTargetUser(ctx, targetIDStr)
+	if err != nil {
+		return UserProfile{}, err
+	}
+	return s.BuildUserProfile(ctx, targetUser)
+}
 
 type PaginatedUsersResult struct {
 	Items      []UserProfile
@@ -327,13 +566,33 @@ func (s *AuthService) AdminListUsers(ctx context.Context, page, limit *int32, se
 		return PaginatedUsersResult{}, err
 	}
 
+	plansList, _ := s.ListPlans(ctx)
+	planMap := make(map[int32]PlanInfo, len(plansList))
+	for _, pl := range plansList {
+		planMap[pl.ID] = pl
+	}
+
 	profiles := make([]UserProfile, 0, len(users))
 	for _, u := range users {
-		prof, err := s.BuildUserProfile(ctx, u)
+		roles, err := s.users.GetRoles(ctx, u.ID)
 		if err != nil {
-			continue
+			roles = []string{"user"}
 		}
-		profiles = append(profiles, prof)
+		effPlanID := u.PlanID
+		if effPlanID <= 0 || (u.PlanExpiresAt.Valid && time.Now().After(u.PlanExpiresAt.Time)) {
+			effPlanID = 1
+		}
+		pl, ok := planMap[effPlanID]
+		if !ok {
+			pl = planMap[1]
+		}
+		linkCount, _ := s.users.CountLinks(ctx, u.ID)
+		profiles = append(profiles, UserProfile{
+			User:      u,
+			Roles:     roles,
+			Plan:      pl,
+			LinkCount: linkCount,
+		})
 	}
 
 	return PaginatedUsersResult{
@@ -364,24 +623,23 @@ func parseOptionalTimestamp(raw *string, existing pgtype.Timestamptz) (pgtype.Ti
 	return pgtype.Timestamptz{}, ErrInvalidInput
 }
 
-func (s *AuthService) AdminUpdateUser(ctx context.Context, actor UserProfile, targetIDStr string, isActive *bool, planID *int32, planExpiresAt *string) (UserProfile, error) {
-	targetID, err := strconv.ParseInt(strings.TrimSpace(targetIDStr), 10, 64)
+func (s *AuthService) AdminUpdateUser(
+	ctx context.Context,
+	actor UserProfile,
+	targetIDStr string,
+	isActive *bool,
+	banReason *string,
+	bannedUntil *string,
+	planID *int32,
+	planExpiresAt *string,
+) (UserProfile, error) {
+	targetUser, err := s.resolveTargetUser(ctx, targetIDStr)
 	if err != nil {
-		return UserProfile{}, ErrUserNotFound
-	}
-
-	targetUser, err := s.users.GetByID(ctx, targetID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return UserProfile{}, ErrUserNotFound
-		}
 		return UserProfile{}, err
 	}
 
 	targetRoles, _ := s.users.GetRoles(ctx, targetUser.ID)
 
-	// Owner hesabının aktifliği veya paketi başka biri tarafından kısıtlanamaz;
-	// ayrıca bir admin başka bir admin üzerinde işlem yapamaz (yalnızca owner yapabilir).
 	if HasAnyRole(targetRoles, "owner") {
 		if isActive != nil && !*isActive {
 			return UserProfile{}, ErrForbidden
@@ -396,6 +654,29 @@ func (s *AuthService) AdminUpdateUser(ctx context.Context, actor UserProfile, ta
 	newIsActive := targetUser.IsActive
 	if isActive != nil {
 		newIsActive = *isActive
+	}
+
+	newBanReason := targetUser.BanReason
+	newBannedAt := targetUser.BannedAt
+	newBannedUntil := targetUser.BannedUntil
+
+	if !newIsActive {
+		if targetUser.IsActive {
+			newBannedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+		}
+		if banReason != nil {
+			newBanReason = strings.TrimSpace(*banReason)
+		}
+		parsedUntil, err := parseOptionalTimestamp(bannedUntil, targetUser.BannedUntil)
+		if err != nil {
+			return UserProfile{}, err
+		}
+		newBannedUntil = parsedUntil
+	} else if isActive != nil && *isActive {
+		// Unban: temizle
+		newBanReason = ""
+		newBannedAt = pgtype.Timestamptz{Valid: false}
+		newBannedUntil = pgtype.Timestamptz{Valid: false}
 	}
 
 	newPlanID := targetUser.PlanID
@@ -416,9 +697,17 @@ func (s *AuthService) AdminUpdateUser(ctx context.Context, actor UserProfile, ta
 		PlanID:        newPlanID,
 		PlanExpiresAt: newExpiresAt,
 		IsActive:      newIsActive,
+		BanReason:     newBanReason,
+		BannedAt:      newBannedAt,
+		BannedUntil:   newBannedUntil,
 	})
 	if err != nil {
 		return UserProfile{}, err
+	}
+
+	if !newIsActive {
+		_ = s.users.RevokeAllUserRefreshTokens(ctx, updated.ID)
+		s.users.RevokeUserTokensBefore(ctx, updated.ID)
 	}
 
 	return s.BuildUserProfile(ctx, updated)
@@ -434,16 +723,8 @@ func (s *AuthService) AdminUpdateUserRole(ctx context.Context, actor UserProfile
 		return UserProfile{}, ErrInvalidInput
 	}
 
-	targetID, err := strconv.ParseInt(strings.TrimSpace(targetIDStr), 10, 64)
+	targetUser, err := s.resolveTargetUser(ctx, targetIDStr)
 	if err != nil {
-		return UserProfile{}, ErrUserNotFound
-	}
-
-	targetUser, err := s.users.GetByID(ctx, targetID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return UserProfile{}, ErrUserNotFound
-		}
 		return UserProfile{}, err
 	}
 
@@ -470,23 +751,26 @@ type UpdatePlanInput struct {
 	AnalyticsDays    *int32
 }
 
-func (s *AuthService) AdminUpdatePlan(ctx context.Context, actor UserProfile, planID int32, in UpdatePlanInput) (db.Plan, error) {
+func (s *AuthService) AdminUpdatePlan(ctx context.Context, actor UserProfile, planID int32, in UpdatePlanInput) (PlanInfo, error) {
 	if !HasAnyRole(actor.Roles, "owner") {
-		return db.Plan{}, ErrForbidden
+		return PlanInfo{}, ErrForbidden
 	}
 
 	existing, err := s.users.GetPlanByID(ctx, planID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Plan{}, ErrPlanNotFound
+			return PlanInfo{}, ErrPlanNotFound
 		}
-		return db.Plan{}, err
+		return PlanInfo{}, err
 	}
+
+	var priceNumeric pgtype.Numeric
+	_ = priceNumeric.Scan(fmt.Sprintf("%.2f", existing.PriceMonthly))
 
 	params := db.UpdatePlanParams{
 		ID:               existing.ID,
 		Name:             existing.Name,
-		PriceMonthly:     existing.PriceMonthly,
+		PriceMonthly:     priceNumeric,
 		MaxLinks:         existing.MaxLinks,
 		AllowCustomAlias: existing.AllowCustomAlias,
 		AllowPassword:    existing.AllowPassword,
@@ -499,7 +783,9 @@ func (s *AuthService) AdminUpdatePlan(ctx context.Context, actor UserProfile, pl
 		params.Name = strings.TrimSpace(*in.Name)
 	}
 	if in.PriceMonthly != nil && *in.PriceMonthly >= 0 {
-		params.PriceMonthly = *in.PriceMonthly
+		var updatedPrice pgtype.Numeric
+		_ = updatedPrice.Scan(fmt.Sprintf("%.2f", *in.PriceMonthly))
+		params.PriceMonthly = updatedPrice
 	}
 	if in.MaxLinks != nil && *in.MaxLinks >= -1 {
 		params.MaxLinks = *in.MaxLinks
@@ -520,16 +806,33 @@ func (s *AuthService) AdminUpdatePlan(ctx context.Context, actor UserProfile, pl
 		params.AnalyticsDays = *in.AnalyticsDays
 	}
 
-	return s.users.UpdatePlan(ctx, params)
+	updated, err := s.users.UpdatePlan(ctx, params)
+	if err != nil {
+		return PlanInfo{}, err
+	}
+	return planFromRow(updated.ID, updated.Slug, updated.Name, updated.PriceMonthly, updated.MaxLinks, updated.AllowCustomAlias, updated.AllowPassword, updated.AllowQr, updated.AllowAds, updated.AnalyticsDays), nil
 }
 
-// LinkService link iş mantığı.
+// LinkService link, anonim link ve QR kod iş mantığı.
 type LinkService struct {
-	links *repository.LinkRepository
+	links         *repository.LinkRepository
+	qrStore       *qr.Store
+	publicBaseURL string
 }
 
-func NewLinkService(links *repository.LinkRepository) *LinkService {
-	return &LinkService{links: links}
+func NewLinkService(links *repository.LinkRepository, qrStore *qr.Store, publicBaseURL string) *LinkService {
+	if strings.TrimSpace(publicBaseURL) == "" {
+		publicBaseURL = "http://localhost"
+	}
+	return &LinkService{
+		links:         links,
+		qrStore:       qrStore,
+		publicBaseURL: strings.TrimRight(publicBaseURL, "/"),
+	}
+}
+
+func (s *LinkService) PublicBaseURL() string {
+	return s.publicBaseURL
 }
 
 func validateTargetURL(raw string) (string, error) {
@@ -575,6 +878,45 @@ func generateBase62(length int) (string, error) {
 	return string(b), nil
 }
 
+func (s *LinkService) generateUniqueAlias(ctx context.Context) (string, error) {
+	for i := 0; i < maxAliasCollision; i++ {
+		candidate, err := generateBase62(defaultAliasLen)
+		if err != nil {
+			return "", err
+		}
+		exists, err := s.links.AliasExists(ctx, candidate)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return candidate, nil
+		}
+	}
+	return "", errors.New("benzersiz kısa kod üretilemedi")
+}
+
+func (s *LinkService) overlayPendingClicks(ctx context.Context, items []db.Link) []db.Link {
+	if len(items) == 0 {
+		return items
+	}
+	aliases := make([]string, len(items))
+	for i, l := range items {
+		aliases[i] = l.Alias
+	}
+	deltas := s.links.GetPendingClickDeltas(ctx, aliases)
+	if len(deltas) == 0 {
+		return items
+	}
+	out := make([]db.Link, len(items))
+	copy(out, items)
+	for i := range out {
+		if d, ok := deltas[out[i].Alias]; ok {
+			out[i].Clicks += d
+		}
+	}
+	return out
+}
+
 type CreateLinkInput struct {
 	Target      string
 	Alias       *string
@@ -617,22 +959,9 @@ func (s *LinkService) CreateLink(ctx context.Context, profile UserProfile, in Cr
 		}
 		finalAlias = validAlias
 	} else {
-		for i := 0; i < maxAliasCollision; i++ {
-			candidate, err := generateBase62(defaultAliasLen)
-			if err != nil {
-				return db.Link{}, err
-			}
-			exists, err := s.links.AliasExists(ctx, candidate)
-			if err != nil {
-				return db.Link{}, err
-			}
-			if !exists {
-				finalAlias = candidate
-				break
-			}
-		}
-		if finalAlias == "" {
-			return db.Link{}, errors.New("benzersiz kısa kod üretilemedi")
+		finalAlias, err = s.generateUniqueAlias(ctx)
+		if err != nil {
+			return db.Link{}, err
 		}
 	}
 
@@ -656,7 +985,6 @@ func (s *LinkService) CreateLink(ctx context.Context, profile UserProfile, in Cr
 		finalAdEnabled = true
 	}
 
-	// Şifre açıksa bekletme kesinlikle kapalı olur.
 	var finalWaitEnabled bool
 	var finalWaitSeconds int32
 	if !pwHash.Valid && in.WaitEnabled != nil && *in.WaitEnabled {
@@ -689,7 +1017,7 @@ func (s *LinkService) CreateLink(ctx context.Context, profile UserProfile, in Cr
 
 	link, err := s.links.Create(ctx, db.CreateLinkParams{
 		PublicID:     publicID,
-		UserID:       profile.User.ID,
+		UserID:       pgtype.Int8{Int64: profile.User.ID, Valid: true},
 		Alias:        finalAlias,
 		TargetUrl:    cleanTarget,
 		PasswordHash: pwHash,
@@ -707,6 +1035,105 @@ func (s *LinkService) CreateLink(ctx context.Context, profile UserProfile, in Cr
 			return db.Link{}, ErrAliasTaken
 		}
 		return db.Link{}, err
+	}
+
+	return link, nil
+}
+
+type CreateAnonymousLinkInput struct {
+	Target      string
+	Password    *string
+	WaitEnabled *bool
+	WaitSeconds *int32
+	TTLHours    *int32
+	ClientIP    string
+}
+
+func (s *LinkService) CreateAnonymousLink(ctx context.Context, in CreateAnonymousLinkInput) (db.Link, error) {
+	cleanTarget, err := validateTargetURL(in.Target)
+	if err != nil {
+		return db.Link{}, err
+	}
+
+	allowed, err := s.links.CheckAndSetAnonRateLimit(ctx, in.ClientIP)
+	if err != nil {
+		return db.Link{}, err
+	}
+	if !allowed {
+		return db.Link{}, ErrAnonRateLimited
+	}
+
+	ttlHours := int32(48)
+	if in.TTLHours != nil {
+		if *in.TTLHours < 1 {
+			ttlHours = 1
+		} else if *in.TTLHours > 48 {
+			ttlHours = 48
+		} else {
+			ttlHours = *in.TTLHours
+		}
+	}
+	expiresAt := pgtype.Timestamptz{
+		Time:  time.Now().Add(time.Duration(ttlHours) * time.Hour),
+		Valid: true,
+	}
+
+	var pwHash pgtype.Text
+	if in.Password != nil && *in.Password != "" {
+		hashed, err := auth.HashPassword(*in.Password)
+		if err != nil {
+			s.links.ReleaseAnonRateLimit(ctx, in.ClientIP)
+			return db.Link{}, err
+		}
+		pwHash = pgtype.Text{String: hashed, Valid: true}
+	}
+
+	var finalWaitEnabled bool
+	var finalWaitSeconds int32
+	if !pwHash.Valid && in.WaitEnabled != nil && *in.WaitEnabled {
+		finalWaitEnabled = true
+		if in.WaitSeconds == nil || *in.WaitSeconds <= 0 {
+			s.links.ReleaseAnonRateLimit(ctx, in.ClientIP)
+			return db.Link{}, ErrInvalidWaitSeconds
+		}
+		finalWaitSeconds = *in.WaitSeconds
+	}
+
+	finalAlias, err := s.generateUniqueAlias(ctx)
+	if err != nil {
+		s.links.ReleaseAnonRateLimit(ctx, in.ClientIP)
+		return db.Link{}, err
+	}
+
+	publicID, err := generateBase62(defaultPublicIDLen)
+	if err != nil {
+		s.links.ReleaseAnonRateLimit(ctx, in.ClientIP)
+		return db.Link{}, err
+	}
+
+	link, err := s.links.CreateAnonymous(ctx, db.CreateAnonymousLinkParams{
+		PublicID:     publicID,
+		Alias:        finalAlias,
+		TargetUrl:    cleanTarget,
+		PasswordHash: pwHash,
+		WaitEnabled:  finalWaitEnabled,
+		WaitSeconds:  finalWaitSeconds,
+		ExpiresAt:    expiresAt,
+		CreatedByIp:  in.ClientIP,
+	})
+	if err != nil {
+		s.links.ReleaseAnonRateLimit(ctx, in.ClientIP)
+		return db.Link{}, err
+	}
+
+	// Anonim linkler için doğrudan QR kodunu da üret ki kullanıcı kaydedebilsin
+	if s.qrStore != nil {
+		shortURL := s.publicBaseURL + "/r/" + link.Alias
+		if qrFilename, qrErr := s.qrStore.Generate(link.PublicID, shortURL); qrErr == nil {
+			if updated, upErr := s.links.UpdateQRPath(ctx, link.ID, qrFilename); upErr == nil {
+				link = updated
+			}
+		}
 	}
 
 	return link, nil
@@ -781,13 +1208,29 @@ func (s *LinkService) ListLinks(ctx context.Context, userID int64, page, limit *
 		return PaginatedLinksResult{}, err
 	}
 
+	items = s.overlayPendingClicks(ctx, items)
+	topLinks = s.overlayPendingClicks(ctx, topLinks)
+
+	// Kullanıcının bekleyen tıklamalarının toplamını istatistiklere yansıt
+	allUserLinks, err := s.links.ListByUser(ctx, userID)
+	extraClicks := int64(0)
+	if err == nil && len(allUserLinks) > 0 {
+		aliases := make([]string, len(allUserLinks))
+		for i, item := range allUserLinks {
+			aliases[i] = item.Alias
+		}
+		for _, d := range s.links.GetPendingClickDeltas(ctx, aliases) {
+			extraClicks += d
+		}
+	}
+
 	return PaginatedLinksResult{
 		Items:       items,
 		Page:        p,
 		Limit:       l,
 		Total:       stats.TotalLinks,
 		TotalPages:  totalPages,
-		TotalClicks: stats.TotalClicks,
+		TotalClicks: stats.TotalClicks + extraClicks,
 		LockedCount: stats.LockedLinks,
 		TopLinks:    topLinks,
 	}, nil
@@ -817,6 +1260,7 @@ func (s *LinkService) GetLink(ctx context.Context, idStr string, userID int64) (
 		}
 		return db.Link{}, err
 	}
+	link.Clicks += s.links.GetPendingClickDelta(ctx, link.Alias)
 	return link, nil
 }
 
@@ -906,7 +1350,6 @@ func (s *LinkService) UpdateLink(ctx context.Context, profile UserProfile, idStr
 		newWaitSeconds = *in.WaitSeconds
 	}
 
-	// Şifre + bekletme aynı anda açık olamaz: şifre aktifse bekletme kapatılır.
 	if newPwHash.Valid && newPwHash.String != "" {
 		newWaitEnabled = false
 		newWaitSeconds = 0
@@ -950,7 +1393,7 @@ func (s *LinkService) UpdateLink(ctx context.Context, profile UserProfile, idStr
 
 	updated, err := s.links.Update(ctx, existing.Alias, db.UpdateLinkParams{
 		ID:           existing.ID,
-		UserID:       profile.User.ID,
+		UserID:       pgtype.Int8{Int64: profile.User.ID, Valid: true},
 		Alias:        newAlias,
 		TargetUrl:    newTarget,
 		PasswordHash: newPwHash,
@@ -970,6 +1413,13 @@ func (s *LinkService) UpdateLink(ctx context.Context, profile UserProfile, idStr
 		return db.Link{}, err
 	}
 
+	// Alias değiştiyse ve QR kodu varsa yeni kısa link için QR dosyasını yenile
+	if s.qrStore != nil && updated.QrCodePath != "" && existing.Alias != updated.Alias {
+		shortURL := s.publicBaseURL + "/r/" + updated.Alias
+		_, _ = s.qrStore.Generate(updated.PublicID, shortURL)
+	}
+
+	updated.Clicks += s.links.GetPendingClickDelta(ctx, updated.Alias)
 	return updated, nil
 }
 
@@ -1038,10 +1488,113 @@ func (s *LinkService) DeleteLink(ctx context.Context, idStr string, userID int64
 	return nil
 }
 
+// --- QR Kod Yönetimi ---
+
+func (s *LinkService) GenerateLinkQR(ctx context.Context, profile UserProfile, idStr string) (db.Link, error) {
+	if s.qrStore == nil {
+		return db.Link{}, errors.New("QR servisi aktif değil")
+	}
+
+	publicID := strings.TrimSpace(idStr)
+	if publicID == "" {
+		return db.Link{}, ErrLinkNotFound
+	}
+
+	var link db.Link
+	var err error
+	privileged := IsPrivileged(profile.Roles)
+	if privileged {
+		link, err = s.links.GetByPublicID(ctx, publicID)
+	} else {
+		link, err = s.links.GetByIDAndUser(ctx, publicID, profile.User.ID)
+	}
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Link{}, ErrLinkNotFound
+		}
+		return db.Link{}, err
+	}
+
+	if !privileged && !profile.Plan.AllowQr {
+		return db.Link{}, ErrPlanQRRestricted
+	}
+
+	shortURL := s.publicBaseURL + "/r/" + link.Alias
+	filename, err := s.qrStore.Generate(link.PublicID, shortURL)
+	if err != nil {
+		return db.Link{}, err
+	}
+
+	updated, err := s.links.UpdateQRPath(ctx, link.ID, filename)
+	if err != nil {
+		return db.Link{}, err
+	}
+	updated.Clicks += s.links.GetPendingClickDelta(ctx, updated.Alias)
+	return updated, nil
+}
+
+func (s *LinkService) GetLinkQRFile(ctx context.Context, idStr string) (alias string, filePath string, err error) {
+	if s.qrStore == nil {
+		return "", "", ErrQRNotFound
+	}
+
+	publicID := strings.TrimSpace(idStr)
+	if publicID == "" {
+		return "", "", ErrLinkNotFound
+	}
+
+	link, err := s.links.GetByPublicID(ctx, publicID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", ErrLinkNotFound
+		}
+		return "", "", err
+	}
+
+	if link.QrCodePath == "" {
+		return "", "", ErrQRNotFound
+	}
+
+	fullPath, err := s.qrStore.ReadPath(link.QrCodePath)
+	if err != nil {
+		return "", "", ErrQRNotFound
+	}
+
+	return link.Alias, fullPath, nil
+}
+
+func (s *LinkService) DeleteLinkQR(ctx context.Context, profile UserProfile, idStr string) error {
+	publicID := strings.TrimSpace(idStr)
+	if publicID == "" {
+		return ErrLinkNotFound
+	}
+
+	var link db.Link
+	var err error
+	if IsPrivileged(profile.Roles) {
+		link, err = s.links.GetByPublicID(ctx, publicID)
+	} else {
+		link, err = s.links.GetByIDAndUser(ctx, publicID, profile.User.ID)
+	}
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrLinkNotFound
+		}
+		return err
+	}
+
+	if s.qrStore != nil && link.QrCodePath != "" {
+		s.qrStore.Delete(link.QrCodePath)
+	}
+
+	_, err = s.links.UpdateQRPath(ctx, link.ID, "")
+	return err
+}
+
 // --- Admin Link Operations ---
 
 type PaginatedAdminLinksResult struct {
-	Items      []db.AdminLinkRow
+	Items      []db.ListAdminLinksPaginatedRow
 	Page       int32
 	Limit      int32
 	Total      int64
@@ -1050,6 +1603,22 @@ type PaginatedAdminLinksResult struct {
 
 func (s *LinkService) AdminGetStats(ctx context.Context) (db.GetPlatformStatsRow, error) {
 	return s.links.GetPlatformStats(ctx)
+}
+
+func (s *LinkService) AdminGetLink(ctx context.Context, idStr string) (db.GetAdminLinkByPublicIDRow, error) {
+	publicID := strings.TrimSpace(idStr)
+	if publicID == "" {
+		return db.GetAdminLinkByPublicIDRow{}, ErrLinkNotFound
+	}
+	row, err := s.links.GetAdminLinkByPublicID(ctx, publicID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.GetAdminLinkByPublicIDRow{}, ErrLinkNotFound
+		}
+		return db.GetAdminLinkByPublicIDRow{}, err
+	}
+	row.Clicks += s.links.GetPendingClickDelta(ctx, row.Alias)
+	return row, nil
 }
 
 func (s *LinkService) AdminListLinks(ctx context.Context, page, limit *int32, search, status *string) (PaginatedAdminLinksResult, error) {
@@ -1078,6 +1647,19 @@ func (s *LinkService) AdminListLinks(ctx context.Context, page, limit *int32, se
 	items, err := s.links.ListAdminLinksPaginated(ctx, q, st, l, offset)
 	if err != nil {
 		return PaginatedAdminLinksResult{}, err
+	}
+
+	if len(items) > 0 {
+		aliases := make([]string, len(items))
+		for i, item := range items {
+			aliases[i] = item.Alias
+		}
+		deltas := s.links.GetPendingClickDeltas(ctx, aliases)
+		for i := range items {
+			if d, ok := deltas[items[i].Alias]; ok {
+				items[i].Clicks += d
+			}
+		}
 	}
 
 	return PaginatedAdminLinksResult{
@@ -1199,6 +1781,9 @@ func (s *LinkService) AdminUpdateLink(ctx context.Context, idStr string, in Upda
 		case "unchecked", "safe", "suspicious", "malicious", "blocked":
 			newSecStatus = st
 			newSecCheckedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+			if (st == "blocked" || st == "malicious") && in.IsActive == nil {
+				newIsActive = false
+			}
 		default:
 			return db.Link{}, ErrInvalidInput
 		}
@@ -1227,6 +1812,12 @@ func (s *LinkService) AdminUpdateLink(ctx context.Context, idStr string, in Upda
 		return db.Link{}, err
 	}
 
+	if s.qrStore != nil && updated.QrCodePath != "" && existing.Alias != updated.Alias {
+		shortURL := s.publicBaseURL + "/r/" + updated.Alias
+		_, _ = s.qrStore.Generate(updated.PublicID, shortURL)
+	}
+
+	updated.Clicks += s.links.GetPendingClickDelta(ctx, updated.Alias)
 	return updated, nil
 }
 

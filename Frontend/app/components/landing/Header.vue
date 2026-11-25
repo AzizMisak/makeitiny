@@ -1,7 +1,10 @@
 <script setup lang="ts">
 const { isLoggedIn } = useAuth()
+const { isDark, toggleTheme, syncFromDom } = useTheme()
 const route = useRoute()
 const router = useRouter()
+
+onMounted(syncFromDom)
 
 function scrollToElementById(sectionId: string) {
   if (!import.meta.client) return
@@ -61,7 +64,17 @@ function handleLogoClick(event: MouseEvent) {
         </a>
       </nav>
 
-      <div class="flex items-center gap-2.5">
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border-[1.5px] border-ink bg-card text-ink transition-colors hover:bg-paper-2"
+          :title="isDark ? 'Gündüz moduna geç' : 'Gece moduna geç'"
+          :aria-label="isDark ? 'Gündüz moduna geç' : 'Gece moduna geç'"
+          @click="toggleTheme"
+        >
+          <UiIcon :name="isDark ? 'sun' : 'moon'" :size="17" />
+        </button>
+
         <template v-if="isLoggedIn">
           <UiButton to="/dashboard" variant="secondary">Panele git</UiButton>
           <UiButton to="/dashboard/new" variant="primary" class="hidden sm:inline-flex">

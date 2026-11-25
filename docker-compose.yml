@@ -27,9 +27,12 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-makeitiny}:${POSTGRES_PASSWORD:-makeitiny}@postgres:5432/${POSTGRES_DB:-makeitiny}?sslmode=disable
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-makeitiny-dev-secret-key-2026}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
+      QR_STORAGE_DIR: /storage/qrcodes
       PORT: "8080"
     volumes:
       - ./Backend/db/migrations:/migrations:ro
+      - ./Backend/storage/qrcodes:/storage/qrcodes
     depends_on:
       - postgres
       - redis

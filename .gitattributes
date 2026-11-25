@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+**/server.gen.go linguist-generated=true
+**/*.sql.go linguist-generated=true
+Frontend/package-lock.json linguist-generated=true
+
+Frontend/** linguist-vendored=true
+docs/** linguist-documentation=true
+openapi/** linguist-documentation=true

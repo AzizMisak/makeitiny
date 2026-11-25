@@ -169,3 +169,22 @@ Bu doküman, MakeItTiny projesinin geliştirilme sürecinde alınan temel mimari
 * **Gerekçe:**
   * Geliştirme sürecinde sadeliği korumak için tek Frontend ile hız kazanılırken, güvenlik tamamen Backend RBAC (`RequireRole`) katmanında tutuldu.
   * İleride kurumsal seviyede fiziksel UI izolasyonuna geçiş yolu (`panel.localhost`) kayıt altına alındı.
+
+---
+
+### ADR-012: 16 Haneli Kullanıcı Public ID, Refresh Token Rotasyonu, Write-Behind Redis Pipeline, Anonim Kısaltma, QR Depolama ve Moderasyon
+
+* **Durum:** Kabul Edildi
+* **Bağlam:** Sistem ölçeklenebilirliğini, güvenliğini ve yönetim kabiliyetini artırmak amacıyla; kullanıcı dış kimliklerinin 16 karakterli rastgele `public_id`'ye geçirilmesi, 7 günlük statik JWT riskinin giderilmesi, her yönlendirmede PostgreSQL'e yazmanın yarattığı I/O darboğazının ortadan kaldırılması, üyeliksiz (anonim) 48 saatlik link kısaltma, QR kod üretimi/depolama, owner koruması, ban/moderasyon ve GitHub dil istatistiği (`.gitattributes`) ihtiyaçları ortaya çıktı.
+* **Karar:**
+  1. **16 Haneli Kullanıcı `public_id` & Owner Koruması:** `users` tablosuna `public_id VARCHAR(16) UNIQUE NOT NULL` eklendi; iç join performansı için `BIGINT id` korunurken dış API ve JWT `sub` alanında rastgele 16 karakter Base62 kimlik kullanıldı. `owner` rolündeki hesabın silinmesini engellemek için uygulama katmanı kontrolüne ek olarak veritabanı seviyesinde `trg_prevent_owner_delete` BEFORE DELETE trigger'ı eklendi.
+  2. **Kısa Ömürlü JWT + Rotating HttpOnly Refresh Token & Ban İptali:** Access token ömrü 15 dakikaya (`jti` claim'i ile) indirildi; oturum sürekliliği SHA-256 hash'i `refresh_tokens` tablosunda saklanan, `HttpOnly; SameSite=Lax` cookie olarak dönen ve her yenilemede rotate edilen (replay tespiti içeren) Refresh Token ile sağlandı. Banlanan veya çıkış yapan kullanıcıların mevcut access token'ları Redis'teki `user:revoked_before:<id>` ve `jwt:blacklist:<jti>` anahtarlarıyla anında geçersiz kılındı.
+  3. **Redis Write-Behind (30 sn Sync Worker) & Pipeline Optimizasyonu:** `router` servisinin sıcak yönlendirme yolunda PostgreSQL'e eşzamanlı tıklama/log yazması kaldırıldı; tıklamalar `HINCRBY link:{alias} clicks 1`, `HINCRBY clicks:deltas {id} 1` ve `RPUSH logs:queue` ile tek bir Redis Pipeline içinde toplandı. `api` servisindeki arka plan worker'ı her 30 saniyede bir atomik `RENAME` (`clicks:deltas` / `logs:queue`) ile biriken verileri PostgreSQL'e toplu (batch `UPDATE` + `CopyFrom`) aktarır. Şifreli linklerin `GET /r/{alias}` isteği artık tıklama saymaz; yalnızca başarılı `/unlock` sonrası sayım yapılır. Hedef URL erişilebilirlik ön kontrolü Redis'te `reach:{alias}` anahtarıyla 5 dakika önbelleklenir.
+  4. **Anonim Kısaltma (`POST /api/links/anonymous`) & Log Koruması:** Giriş yapmamış kullanıcılar IP başına 24 saatte 1 kez (`anon:limit:{ip}` `SET NX EX 86400`), en fazla 48 saatlik TTL ile, parola/bekleme süresi/QR destekli link oluşturabilir. `logs.link_id` foreign key'i `ON DELETE SET NULL` yapılarak ve `link_alias`/`link_public_id` kopyalanarak anonim veya silinen linklerin geçmiş erişim logları korunur.
+  5. **QR Kod Üretimi ve Dosya Sistemi Depolama:** QR PNG görselleri veritabanı BLOB'u yerine paylaşımlı Docker volume (`./Backend/storage/qrcodes:/storage/qrcodes`) üzerinde `{public_id}.png` olarak tutulur, `GET /api/links/{id}/qr` üzerinden `ETag`/`Cache-Control` ile servis edilir; alias güncellendiğinde yeniden üretilir, link/kullanıcı silindiğinde diskten temizlenir.
+  6. **`.gitattributes` ve Frontend UX:** GitHub Linguist ayarlarıyla birincil depo dili Go olarak korunup `Frontend/**` ve üretilen dosyalar işaretlendi; Frontend'de FOUC-free gece modu, çalışma alanı ayrımı (Kişisel / Yönetim / Owner), silme onay modalı ve otomatik 401 token yenileme eklendi.
+* **Gerekçe:**
+  * DB içi `BIGINT` FK performansından ödün vermeden dışarıya sıralı ID (IDOR/enumeration) sızıntısı önlenmiş oldu.
+  * Write-behind mimarisi ve Redis pipeline yönlendirme gecikmesini milisaniye seviyesinde sabitlerken, atomik `RENAME` yarış durumunu (race condition) ortadan kaldırır.
+  * 15 dk Access + rotating HttpOnly Refresh Token yapısı XSS kaynaklı uzun süreli token sızıntısı ve anlık yetki iptali sorununu çözer.
+  * İkili dosya (QR PNG) depolamasının dosya sisteminde tutulması PostgreSQL şişmesini engeller.

@@ -2,19 +2,31 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
 	"makeitiny/router/internal/db"
 )
 
-const linkCacheTTL = 24 * time.Hour
+const (
+	linkCacheTTL      = 24 * time.Hour
+	reachCacheTTL     = 5 * time.Minute
+	clickDeltasKey    = "clicks:deltas"
+	logsQueueKey      = "logs:queue"
+	incrIfExistsLua   = `if redis.call('EXISTS', KEYS[1]) == 1 then redis.call('HINCRBY', KEYS[1], 'clicks', 1) end return 1`
+)
 
 func linkCacheKey(alias string) string {
 	return "link:" + alias
+}
+
+func reachCacheKey(alias string) string {
+	return "reach:" + alias
 }
 
 type LinkRecord struct {
@@ -32,9 +44,26 @@ type LinkRecord struct {
 	MaxClicks      int64
 	AdEnabled      bool
 	SecurityStatus string
+	IsAnonymous    bool
 }
 
-// LinkRepository link verisine erişim katmanı (Redis Hash + PostgreSQL).
+type LogQueueEntry struct {
+	LinkID         int64  `json:"link_id"`
+	LinkAlias      string `json:"link_alias"`
+	LinkPublicID   string `json:"link_public_id"`
+	IPAddress      string `json:"ip_address"`
+	UserAgent      string `json:"user_agent"`
+	DeviceType     string `json:"device_type"`
+	Browser        string `json:"browser"`
+	OS             string `json:"os"`
+	Referer        string `json:"referer"`
+	AcceptLanguage string `json:"accept_language"`
+	CountryCode    string `json:"country_code"`
+	EventType      string `json:"event_type"`
+	ClickedAt      string `json:"clicked_at"`
+}
+
+// LinkRepository link verisine erişim katmanı (Redis Hash + Pipeline + PostgreSQL fallback).
 type LinkRepository struct {
 	q     *db.Queries
 	redis *redis.Client
@@ -64,6 +93,7 @@ func (r *LinkRepository) GetByAlias(ctx context.Context, alias string) (LinkReco
 			expiresAtUnix, _ := strconv.ParseInt(vals["expires_at"], 10, 64)
 			maxClicks, _ := strconv.ParseInt(vals["max_clicks"], 10, 64)
 			adEnabled, _ := strconv.ParseBool(vals["ad_enabled"])
+			isAnonymous, _ := strconv.ParseBool(vals["is_anonymous"])
 			secStatus := vals["security_status"]
 			if secStatus == "" {
 				secStatus = "unchecked"
@@ -84,6 +114,7 @@ func (r *LinkRepository) GetByAlias(ctx context.Context, alias string) (LinkReco
 				MaxClicks:      maxClicks,
 				AdEnabled:      adEnabled,
 				SecurityStatus: secStatus,
+				IsAnonymous:    isAnonymous,
 			}, nil
 		}
 	}
@@ -108,6 +139,11 @@ func (r *LinkRepository) GetByAlias(ctx context.Context, alias string) (LinkReco
 		maxClicks = link.MaxClicks.Int64
 	}
 
+	isActive := true
+	if link.IsActive.Valid {
+		isActive = link.IsActive.Bool
+	}
+
 	rec := LinkRecord{
 		ID:             link.ID,
 		PublicID:       link.PublicID,
@@ -118,14 +154,25 @@ func (r *LinkRepository) GetByAlias(ctx context.Context, alias string) (LinkReco
 		Clicks:         link.Clicks,
 		WaitEnabled:    link.WaitEnabled,
 		WaitSeconds:    link.WaitSeconds,
-		IsActive:       link.IsActive,
+		IsActive:       isActive,
 		ExpiresAtUnix:  expiresAtUnix,
 		MaxClicks:      maxClicks,
 		AdEnabled:      link.AdEnabled,
 		SecurityStatus: link.SecurityStatus,
+		IsAnonymous:    link.IsAnonymous,
 	}
 
 	if r.redis != nil {
+		ttl := linkCacheTTL
+		if link.IsAnonymous && link.ExpiresAt.Valid {
+			rem := time.Until(link.ExpiresAt.Time)
+			if rem > 0 && rem < ttl {
+				ttl = rem
+			} else if rem <= 0 {
+				return rec, nil
+			}
+		}
+
 		err := r.redis.HSet(ctx, key, map[string]any{
 			"id":              strconv.FormatInt(rec.ID, 10),
 			"public_id":       rec.PublicID,
@@ -141,42 +188,74 @@ func (r *LinkRepository) GetByAlias(ctx context.Context, alias string) (LinkReco
 			"max_clicks":      strconv.FormatInt(rec.MaxClicks, 10),
 			"ad_enabled":      strconv.FormatBool(rec.AdEnabled),
 			"security_status": rec.SecurityStatus,
+			"is_anonymous":    strconv.FormatBool(rec.IsAnonymous),
 		}).Err()
 		if err != nil {
 			log.Printf("router redis HSET uyarısı (%s): %v", key, err)
 		} else {
-			_ = r.redis.Expire(ctx, key, linkCacheTTL).Err()
+			_ = r.redis.Expire(ctx, key, ttl).Err()
 		}
 	}
 
 	return rec, nil
 }
 
-// IncrementClicks önce PostgreSQL üzerinde tıklama sayısını artırır,
-// hemen ardından Redis Hash içindeki clicks alanını atomik olarak (HINCRBY) artırır.
-func (r *LinkRepository) IncrementClicks(ctx context.Context, alias string) error {
-	if err := r.q.IncrementLinkClicks(ctx, alias); err != nil {
-		return err
+// IsTargetReachableCached son 5 dakikada hedef URL erişilebilir olarak doğrulandıysa true döner.
+func (r *LinkRepository) IsTargetReachableCached(ctx context.Context, alias string) bool {
+	if r.redis == nil || alias == "" {
+		return false
 	}
+	n, err := r.redis.Exists(ctx, reachCacheKey(alias)).Result()
+	return err == nil && n > 0
+}
 
+func (r *LinkRepository) CacheTargetReachable(ctx context.Context, alias string) {
+	if r.redis == nil || alias == "" {
+		return
+	}
+	_ = r.redis.Set(ctx, reachCacheKey(alias), "ok", reachCacheTTL).Err()
+}
+
+// RecordClickAndLog hot-path üzerinde PostgreSQL'e yazmadan tek Redis Pipeline ile:
+// 1) link:{alias} Hash clicks sayacını günceller,
+// 2) clicks:deltas Hash'ine +1 fark yazar,
+// 3) logs:queue listesine cihaz log JSON'ını ekler.
+// Redis erişilemezse veri kaybını önlemek için doğrudan PostgreSQL fallback kullanır.
+func (r *LinkRepository) RecordClickAndLog(ctx context.Context, rec LinkRecord, entry LogQueueEntry) {
 	if r.redis != nil {
-		key := linkCacheKey(alias)
-		exists, err := r.redis.Exists(ctx, key).Result()
-		if err == nil && exists > 0 {
-			if err := r.redis.HIncrBy(ctx, key, "clicks", 1).Err(); err != nil {
-				log.Printf("router redis HINCRBY uyarısı (%s): %v", key, err)
+		payload, err := json.Marshal(entry)
+		if err == nil {
+			pipe := r.redis.Pipeline()
+			pipe.Eval(ctx, incrIfExistsLua, []string{linkCacheKey(rec.Alias)})
+			pipe.HIncrBy(ctx, clickDeltasKey, rec.Alias, 1)
+			pipe.RPush(ctx, logsQueueKey, string(payload))
+			if _, pipeErr := pipe.Exec(ctx); pipeErr == nil {
+				return
+			} else {
+				log.Printf("router redis pipeline uyarısı (%s), postgres fallback: %v", rec.Alias, pipeErr)
 			}
 		}
 	}
 
-	return nil
-}
-
-// CreateLog tıklayan cihazın bilgilerini PostgreSQL logs tablosuna kaydeder.
-func (r *LinkRepository) CreateLog(ctx context.Context, params db.CreateLogParams) error {
-	_, err := r.q.CreateLog(ctx, params)
-	if err != nil {
-		log.Printf("router log kaydı uyarısı (link_id=%d): %v", params.LinkID, err)
+	// Fallback: Redis devre dışıysa doğrudan PostgreSQL'e yaz
+	_ = r.q.IncrementLinkClicks(ctx, rec.Alias)
+	if rec.ID > 0 {
+		_, err := r.q.CreateLog(ctx, db.CreateLogParams{
+			LinkID:         pgtype.Int8{Int64: rec.ID, Valid: true},
+			LinkAlias:      entry.LinkAlias,
+			LinkPublicID:   entry.LinkPublicID,
+			IpAddress:      entry.IPAddress,
+			UserAgent:      entry.UserAgent,
+			DeviceType:     entry.DeviceType,
+			Browser:        entry.Browser,
+			Os:             entry.OS,
+			Referer:        entry.Referer,
+			AcceptLanguage: entry.AcceptLanguage,
+			CountryCode:    entry.CountryCode,
+			EventType:      entry.EventType,
+		})
+		if err != nil {
+			log.Printf("router postgres log fallback hatası (link_id=%d): %v", rec.ID, err)
+		}
 	}
-	return err
 }

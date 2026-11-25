@@ -3,8 +3,11 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
@@ -42,6 +45,22 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
+func extractClientIP(r *http.Request) string {
+	if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
+		return ip
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if p := strings.TrimSpace(parts[0]); p != "" {
+			return p
+		}
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
 // authorize gelen isteğin JWT token'ını doğrular, kullanıcının aktifliğini ve (varsa) gereken rolleri kontrol eder.
 func (h *Handler) authorize(w http.ResponseWriter, r *http.Request, requiredRoles ...string) (service.UserProfile, bool) {
 	tokenStr, err := auth.ExtractToken(r)
@@ -66,7 +85,7 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request, requiredRole
 	return profile, true
 }
 
-func toPlanItem(p db.Plan) gen.PlanItem {
+func toPlanItem(p service.PlanInfo) gen.PlanItem {
 	return gen.PlanItem{
 		Id:               p.ID,
 		Slug:             p.Slug,
@@ -91,15 +110,26 @@ func toUserModel(p service.UserProfile) gen.User {
 		s := p.User.PlanExpiresAt.Time.Format("2006-01-02")
 		planExpiresAt = &s
 	}
+	var bannedUntil *string
+	if p.User.BannedUntil.Valid {
+		s := p.User.BannedUntil.Time.Format(time.RFC3339)
+		bannedUntil = &s
+	}
 	roles := p.Roles
 	if len(roles) == 0 {
 		roles = []string{"user"}
 	}
+	id := p.User.PublicID
+	if id == "" {
+		id = strconv.FormatInt(p.User.ID, 10)
+	}
 	return gen.User{
-		Id:            strconv.FormatInt(p.User.ID, 10),
+		Id:            id,
 		Name:          p.User.Name,
 		Email:         openapi_types.Email(p.User.Email),
 		IsActive:      p.User.IsActive,
+		BanReason:     p.User.BanReason,
+		BannedUntil:   bannedUntil,
 		Roles:         roles,
 		Plan:          toPlanItem(p.Plan),
 		PlanExpiresAt: planExpiresAt,
@@ -127,6 +157,11 @@ func toLinkItem(l db.Link) gen.LinkItem {
 	if secStatus == "" {
 		secStatus = "unchecked"
 	}
+	hasQr := l.QrCodePath != ""
+	qrUrl := ""
+	if hasQr {
+		qrUrl = "/api/links/" + l.PublicID + "/qr"
+	}
 	return gen.LinkItem{
 		Id:             l.PublicID,
 		Alias:          l.Alias,
@@ -141,12 +176,48 @@ func toLinkItem(l db.Link) gen.LinkItem {
 		MaxClicks:      maxClicks,
 		AdEnabled:      l.AdEnabled,
 		SecurityStatus: secStatus,
+		HasQr:          hasQr,
+		QrUrl:          qrUrl,
+		IsAnonymous:    l.IsAnonymous,
 		CreatedAt:      createdAt,
 	}
 }
 
-func toAdminLinkItem(row db.AdminLinkRow) gen.AdminLinkItem {
-	base := toLinkItem(row.Link)
+func linkFromAdminRow(row db.ListAdminLinksPaginatedRow) db.Link {
+	return db.Link{
+		ID:                row.ID,
+		UserID:            row.UserID,
+		Alias:             row.Alias,
+		TargetUrl:         row.TargetUrl,
+		PasswordHash:      row.PasswordHash,
+		Clicks:            row.Clicks,
+		CreatedAt:         row.CreatedAt,
+		WaitEnabled:       row.WaitEnabled,
+		WaitSeconds:       row.WaitSeconds,
+		PublicID:          row.PublicID,
+		Title:             row.Title,
+		IsActive:          row.IsActive,
+		ExpiresAt:         row.ExpiresAt,
+		MaxClicks:         row.MaxClicks,
+		AdEnabled:         row.AdEnabled,
+		SecurityStatus:    row.SecurityStatus,
+		SecurityCheckedAt: row.SecurityCheckedAt,
+		QrCodePath:        row.QrCodePath,
+		UpdatedAt:         row.UpdatedAt,
+		IsAnonymous:       row.IsAnonymous,
+		CreatedByIp:       row.CreatedByIp,
+	}
+}
+
+func toAdminLinkItem(row db.ListAdminLinksPaginatedRow) gen.AdminLinkItem {
+	base := toLinkItem(linkFromAdminRow(row))
+	userID := row.UserPublicID
+	if userID == "" && row.UserID.Valid && row.UserID.Int64 > 0 {
+		userID = strconv.FormatInt(row.UserID.Int64, 10)
+	}
+	if userID == "" {
+		userID = "0"
+	}
 	return gen.AdminLinkItem{
 		Id:             base.Id,
 		Alias:          base.Alias,
@@ -161,8 +232,66 @@ func toAdminLinkItem(row db.AdminLinkRow) gen.AdminLinkItem {
 		MaxClicks:      base.MaxClicks,
 		AdEnabled:      base.AdEnabled,
 		SecurityStatus: base.SecurityStatus,
+		HasQr:          base.HasQr,
+		QrUrl:          base.QrUrl,
+		IsAnonymous:    base.IsAnonymous,
 		CreatedAt:      base.CreatedAt,
-		UserId:         strconv.FormatInt(row.UserID, 10),
+		UserId:         userID,
+		UserEmail:      row.UserEmail,
+		UserName:       row.UserName,
+	}
+}
+
+func toAdminLinkDetailItem(row db.GetAdminLinkByPublicIDRow) gen.AdminLinkItem {
+	base := toLinkItem(db.Link{
+		ID:                row.ID,
+		UserID:            row.UserID,
+		Alias:             row.Alias,
+		TargetUrl:         row.TargetUrl,
+		PasswordHash:      row.PasswordHash,
+		Clicks:            row.Clicks,
+		CreatedAt:         row.CreatedAt,
+		WaitEnabled:       row.WaitEnabled,
+		WaitSeconds:       row.WaitSeconds,
+		PublicID:          row.PublicID,
+		Title:             row.Title,
+		IsActive:          row.IsActive,
+		ExpiresAt:         row.ExpiresAt,
+		MaxClicks:         row.MaxClicks,
+		AdEnabled:         row.AdEnabled,
+		SecurityStatus:    row.SecurityStatus,
+		SecurityCheckedAt: row.SecurityCheckedAt,
+		QrCodePath:        row.QrCodePath,
+		UpdatedAt:         row.UpdatedAt,
+		IsAnonymous:       row.IsAnonymous,
+		CreatedByIp:       row.CreatedByIp,
+	})
+	userID := row.UserPublicID
+	if userID == "" && row.UserID.Valid && row.UserID.Int64 > 0 {
+		userID = strconv.FormatInt(row.UserID.Int64, 10)
+	}
+	if userID == "" {
+		userID = "0"
+	}
+	return gen.AdminLinkItem{
+		Id:             base.Id,
+		Alias:          base.Alias,
+		Target:         base.Target,
+		Title:          base.Title,
+		Clicks:         base.Clicks,
+		Locked:         base.Locked,
+		WaitEnabled:    base.WaitEnabled,
+		WaitSeconds:    base.WaitSeconds,
+		IsActive:       base.IsActive,
+		ExpiresAt:      base.ExpiresAt,
+		MaxClicks:      base.MaxClicks,
+		AdEnabled:      base.AdEnabled,
+		SecurityStatus: base.SecurityStatus,
+		HasQr:          base.HasQr,
+		QrUrl:          base.QrUrl,
+		IsAnonymous:    base.IsAnonymous,
+		CreatedAt:      base.CreatedAt,
+		UserId:         userID,
 		UserEmail:      row.UserEmail,
 		UserName:       row.UserName,
 	}
@@ -218,7 +347,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, profile, err := h.auth.Register(r.Context(), req.Name, string(req.Email), req.Password)
+	token, refreshToken, profile, err := h.auth.Register(r.Context(), req.Name, string(req.Email), req.Password, r.UserAgent(), extractClientIP(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidEmail):
@@ -235,6 +364,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auth.SetRefreshCookie(w, refreshToken, int(auth.RefreshTokenTTL.Seconds()))
 	writeJSON(w, http.StatusCreated, gen.AuthResponse{
 		Token: token,
 		User:  toUserModel(profile),
@@ -248,7 +378,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, profile, err := h.auth.Login(r.Context(), string(req.Email), req.Password)
+	token, refreshToken, profile, err := h.auth.Login(r.Context(), string(req.Email), req.Password, r.UserAgent(), extractClientIP(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidInput):
@@ -263,6 +393,36 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auth.SetRefreshCookie(w, refreshToken, int(auth.RefreshTokenTTL.Seconds()))
+	writeJSON(w, http.StatusOK, gen.AuthResponse{
+		Token: token,
+		User:  toUserModel(profile),
+	})
+}
+
+func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
+	rawRefresh := auth.ExtractRefreshCookie(r)
+	if rawRefresh == "" {
+		var req gen.RefreshTokenRequest
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != nil {
+				rawRefresh = strings.TrimSpace(*req.RefreshToken)
+			}
+		}
+	}
+
+	token, newRefresh, profile, err := h.auth.RefreshSession(r.Context(), rawRefresh, r.UserAgent(), extractClientIP(r))
+	if err != nil {
+		auth.ClearRefreshCookie(w)
+		if errors.Is(err, service.ErrUserSuspended) {
+			writeError(w, http.StatusForbidden, "account_suspended", err.Error())
+			return
+		}
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Oturum yenilenemedi. Lütfen tekrar giriş yapın.")
+		return
+	}
+
+	auth.SetRefreshCookie(w, newRefresh, int(auth.RefreshTokenTTL.Seconds()))
 	writeJSON(w, http.StatusOK, gen.AuthResponse{
 		Token: token,
 		User:  toUserModel(profile),
@@ -270,9 +430,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.authorize(w, r); !ok {
-		return
-	}
+	tokenStr, _ := auth.ExtractToken(r)
+	rawRefresh := auth.ExtractRefreshCookie(r)
+	h.auth.Logout(r.Context(), tokenStr, rawRefresh)
+	auth.ClearRefreshCookie(w)
 
 	writeJSON(w, http.StatusOK, gen.MessageResponse{
 		Message: "Oturum başarıyla sonlandırıldı.",
@@ -280,14 +441,21 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	actor, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+
 	var req gen.ResetPasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json", "Geçersiz JSON gövdesi.")
 		return
 	}
 
-	if err := h.auth.ResetPassword(r.Context(), string(req.Email), req.NewPassword); err != nil {
+	if err := h.auth.ResetPassword(r.Context(), actor, string(req.Email), req.NewPassword); err != nil {
 		switch {
+		case errors.Is(err, service.ErrForbidden):
+			writeError(w, http.StatusForbidden, "forbidden", "Yalnızca kendi şifrenizi değiştirebilirsiniz.")
 		case errors.Is(err, service.ErrPasswordTooShort):
 			writeError(w, http.StatusBadRequest, "password_too_short", err.Error())
 		case errors.Is(err, service.ErrInvalidEmail):
@@ -334,10 +502,64 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auth.ClearRefreshCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // Links
+
+func (h *Handler) CreateAnonymousLink(w http.ResponseWriter, r *http.Request) {
+	var req gen.CreateAnonymousLinkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "Geçersiz JSON gövdesi.")
+		return
+	}
+
+	link, err := h.links.CreateAnonymousLink(r.Context(), service.CreateAnonymousLinkInput{
+		Target:      req.Target,
+		Password:    req.Password,
+		WaitEnabled: req.WaitEnabled,
+		WaitSeconds: req.WaitSeconds,
+		TTLHours:    req.TtlHours,
+		ClientIP:    extractClientIP(r),
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAnonRateLimited):
+			writeError(w, http.StatusTooManyRequests, "anon_rate_limited", err.Error())
+		case errors.Is(err, service.ErrInvalidTargetURL),
+			errors.Is(err, service.ErrInvalidWaitSeconds),
+			errors.Is(err, service.ErrInvalidInput):
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Anonim link oluşturulurken bir hata oluştu.")
+		}
+		return
+	}
+
+	expiresAt := ""
+	if link.ExpiresAt.Valid {
+		expiresAt = link.ExpiresAt.Time.Format(time.RFC3339)
+	}
+	hasQr := link.QrCodePath != ""
+	qrUrl := ""
+	if hasQr {
+		qrUrl = "/api/links/" + link.PublicID + "/qr"
+	}
+
+	writeJSON(w, http.StatusCreated, gen.AnonymousLinkResponse{
+		Id:          link.PublicID,
+		Alias:       link.Alias,
+		ShortUrl:    h.links.PublicBaseURL() + "/r/" + link.Alias,
+		Target:      link.TargetUrl,
+		Locked:      link.PasswordHash.Valid && link.PasswordHash.String != "",
+		WaitEnabled: link.WaitEnabled,
+		WaitSeconds: link.WaitSeconds,
+		ExpiresAt:   expiresAt,
+		HasQr:       hasQr,
+		QrUrl:       qrUrl,
+	})
+}
 
 func (h *Handler) CreateLink(w http.ResponseWriter, r *http.Request) {
 	profile, ok := h.authorize(w, r)
@@ -508,6 +730,61 @@ func (h *Handler) UpdateLink(w http.ResponseWriter, r *http.Request, id string) 
 	writeJSON(w, http.StatusOK, toLinkItem(updated))
 }
 
+func (h *Handler) GenerateLinkQr(w http.ResponseWriter, r *http.Request, id string) {
+	profile, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+
+	updated, err := h.links.GenerateLinkQR(r.Context(), profile, id)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrLinkNotFound):
+			writeError(w, http.StatusNotFound, "link_not_found", err.Error())
+		case errors.Is(err, service.ErrPlanQRRestricted):
+			writeError(w, http.StatusForbidden, "plan_feature_restricted", err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "QR kod üretilirken bir hata oluştu.")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toLinkItem(updated))
+}
+
+func (h *Handler) GetLinkQr(w http.ResponseWriter, r *http.Request, id string, params gen.GetLinkQrParams) {
+	alias, filePath, err := h.links.GetLinkQRFile(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "qr_not_found", "QR kod bulunamadı.")
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store, no-cache")
+	if params.Download != nil && (*params.Download == "1" || strings.EqualFold(*params.Download, "true")) {
+		w.Header().Set("Content-Disposition", `attachment; filename="qr-`+alias+`.png"`)
+	}
+	http.ServeFile(w, r, filePath)
+}
+
+func (h *Handler) DeleteLinkQr(w http.ResponseWriter, r *http.Request, id string) {
+	profile, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+
+	if err := h.links.DeleteLinkQR(r.Context(), profile, id); err != nil {
+		if errors.Is(err, service.ErrLinkNotFound) {
+			writeError(w, http.StatusNotFound, "link_not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "QR kod silinirken bir hata oluştu.")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) ListLinkLogs(w http.ResponseWriter, r *http.Request, id string, params gen.ListLinkLogsParams) {
 	profile, ok := h.authorize(w, r)
 	if !ok {
@@ -608,6 +885,24 @@ func (h *Handler) AdminListLinks(w http.ResponseWriter, r *http.Request, params 
 		Total:      result.Total,
 		TotalPages: result.TotalPages,
 	})
+}
+
+func (h *Handler) AdminGetLink(w http.ResponseWriter, r *http.Request, id string) {
+	if _, ok := h.authorize(w, r, "admin", "owner"); !ok {
+		return
+	}
+
+	row, err := h.links.AdminGetLink(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, service.ErrLinkNotFound) {
+			writeError(w, http.StatusNotFound, "link_not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Link bilgisi alınamadı.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toAdminLinkDetailItem(row))
 }
 
 func (h *Handler) AdminUpdateLink(w http.ResponseWriter, r *http.Request, id string) {
@@ -731,6 +1026,24 @@ func (h *Handler) AdminListUsers(w http.ResponseWriter, r *http.Request, params 
 	})
 }
 
+func (h *Handler) AdminGetUser(w http.ResponseWriter, r *http.Request, id string) {
+	if _, ok := h.authorize(w, r, "admin", "owner"); !ok {
+		return
+	}
+
+	prof, err := h.auth.AdminGetUser(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			writeError(w, http.StatusNotFound, "user_not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Kullanıcı bilgisi alınamadı.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toUserModel(prof))
+}
+
 func (h *Handler) AdminUpdateUser(w http.ResponseWriter, r *http.Request, id string) {
 	actor, ok := h.authorize(w, r, "admin", "owner")
 	if !ok {
@@ -743,7 +1056,7 @@ func (h *Handler) AdminUpdateUser(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 
-	updated, err := h.auth.AdminUpdateUser(r.Context(), actor, id, req.IsActive, req.PlanId, req.PlanExpiresAt)
+	updated, err := h.auth.AdminUpdateUser(r.Context(), actor, id, req.IsActive, req.BanReason, req.BannedUntil, req.PlanId, req.PlanExpiresAt)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrUserNotFound):

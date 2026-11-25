@@ -13,12 +13,14 @@ export interface PlanItem {
   analyticsDays: number
 }
 
-/** Backend'deki kullanıcı. GET /auth/user, POST /auth/login ve POST /auth/register yanıtları. */
+/** Backend'deki kullanıcı. GET /auth/user, POST /auth/login, POST /auth/register ve POST /auth/refresh yanıtları. */
 export interface User {
   id: string
   name: string
   email: string
   isActive: boolean
+  banReason: string
+  bannedUntil?: string
   roles: RoleName[]
   plan: PlanItem
   planExpiresAt?: string
@@ -26,7 +28,7 @@ export interface User {
   createdAt: string
 }
 
-/** POST /auth/login ve POST /auth/register yanıtı. */
+/** POST /auth/login, POST /auth/register ve POST /auth/refresh yanıtı. */
 export interface AuthResponse {
   token: string
   user: User

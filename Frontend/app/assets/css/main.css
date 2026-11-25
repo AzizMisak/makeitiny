@@ -14,12 +14,45 @@
   --color-ok: #2f7a4b;
   --color-ok-soft: #dcefe2;
 
+  --color-ws-personal: #e5481f;
+  --color-ws-personal-soft: #fbe3da;
+  --color-ws-admin: #d97706;
+  --color-ws-admin-soft: #fef3c7;
+  --color-ws-owner: #7c3aed;
+  --color-ws-owner-soft: #ede9fe;
+
   --font-display: 'Bricolage Grotesque', system-ui, sans-serif;
   --font-sans: 'Instrument Sans', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
   --shadow-hard: 3px 3px 0 var(--color-ink);
   --shadow-hard-lg: 6px 6px 0 var(--color-ink);
+}
+
+html.dark {
+  color-scheme: dark;
+  --color-paper: #131311;
+  --color-paper-2: #1c1b18;
+  --color-card: #22211d;
+  --color-ink: #f3efe6;
+  --color-ink-2: #c5bfb2;
+  --color-ink-3: #8e887b;
+  --color-line: #36342e;
+  --color-accent: #f05a32;
+  --color-accent-dark: #ff7954;
+  --color-accent-soft: rgba(240, 90, 50, 0.16);
+  --color-ok: #3ea365;
+  --color-ok-soft: rgba(62, 163, 101, 0.16);
+
+  --color-ws-personal: #f05a32;
+  --color-ws-personal-soft: rgba(240, 90, 50, 0.16);
+  --color-ws-admin: #f59e0b;
+  --color-ws-admin-soft: rgba(245, 158, 11, 0.16);
+  --color-ws-owner: #a78bfa;
+  --color-ws-owner-soft: rgba(167, 139, 250, 0.16);
+
+  --shadow-hard: 3px 3px 0 #070706;
+  --shadow-hard-lg: 6px 6px 0 #070706;
 }
 
 @layer base {
@@ -40,6 +73,19 @@
   body {
     @apply bg-paper font-sans text-ink antialiased;
     overflow-x: hidden;
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+
+  input,
+  select,
+  textarea {
+    color: var(--color-ink);
+  }
+
+  html.dark select,
+  html.dark option {
+    background-color: var(--color-card);
+    color: var(--color-ink);
   }
 
   h1,
