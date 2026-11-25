@@ -1,254 +1,136 @@
 <script setup lang="ts">
 import type { User } from '~/types/auth'
-import type { AdminStatsResponse } from '~/types/link'
 
-definePageMeta({ layout: 'dashboard', middleware: 'auth', roles: ['owner'] })
-useHead({ title: 'Roller & Yetkiler — Owner — makeiTiny' })
+definePageMeta({ layout: 'admin', middleware: 'auth', roles: ['owner'] })
+useHead({ title: 'Roller | Yönetim | makeiTiny' })
 
-type RoleFilter = 'all' | 'owner' | 'admin' | 'user'
+const PAGE_SIZE = 10
+const TEAM_PAGES = 10
 
-const { fetchAdminStats, fetchAdminUsers, adminUpdateUserRole } = useAdmin()
+const { fetchAdminUsers, adminUpdateUserRole } = useAdmin()
+const { ask } = useConfirm()
 const toast = useToast()
 
-const PAGE_SIZE = 20
+// Sol: yönetim ekibi. API role göre süzmediği için kullanıcı listesi sayfa sayfa taranır.
+const team = ref<User[]>([])
+const teamLoading = ref(true)
+const teamError = ref('')
 
-const stats = ref<AdminStatsResponse | null>(null)
+async function loadTeam() {
+  teamLoading.value = true
+  teamError.value = ''
+  try {
+    const first = await fetchAdminUsers(1, 100)
+    const pages = Math.min(Math.max(1, first.totalPages), TEAM_PAGES)
+    const rest = await Promise.all(Array.from({ length: pages - 1 }, (_, i) => fetchAdminUsers(i + 2, 100)))
+    const rank = { owner: 0, admin: 1, user: 2 }
+    team.value = [first, ...rest]
+      .flatMap((r) => r.items)
+      .filter((u) => roleMeta(u.roles).primary !== 'user')
+      .sort((a, b) => rank[roleMeta(a.roles).primary] - rank[roleMeta(b.roles).primary] || a.email.localeCompare(b.email))
+  } catch (e: any) {
+    teamError.value = e?.message ?? 'Yönetim ekibi yüklenemedi.'
+  } finally {
+    teamLoading.value = false
+  }
+}
+
+// Sağ: kullanıcı arama ve yetki verme.
 const users = ref<User[]>([])
 const page = ref(1)
 const total = ref(0)
 const totalPages = ref(1)
+const search = ref('')
 const loading = ref(true)
+const loadedOnce = ref(false)
+const error = ref('')
 
-const searchInput = ref('')
-const activeSearch = ref('')
-const roleFilter = ref<RoleFilter>('all')
-
-const pendingRoleUser = ref<User | null>(null)
-const savingRole = ref(false)
-
-const roleTabs: { value: RoleFilter; label: string }[] = [
-  { value: 'all', label: 'Tümü' },
-  { value: 'owner', label: 'Owner' },
-  { value: 'admin', label: 'Admin' },
-  { value: 'user', label: 'Kullanıcı' }
-]
-
-const filteredUsers = computed(() => {
-  if (roleFilter.value === 'all') return users.value
-  return users.value.filter((u) => roleBadgeMeta(u.roles).primary === roleFilter.value)
-})
-
-const adminCountOnPage = computed(() =>
-  users.value.filter((u) => u.roles.includes('admin')).length
-)
-
-async function loadUsers(targetPage = page.value) {
+async function loadUsers(next = page.value) {
   loading.value = true
+  error.value = ''
   try {
-    const [usersRes, statsRes] = await Promise.all([
-      fetchAdminUsers(targetPage, PAGE_SIZE, activeSearch.value),
-      fetchAdminStats().catch(() => null)
-    ])
-    users.value = usersRes.items
-    page.value = usersRes.page
-    total.value = usersRes.total
-    totalPages.value = Math.max(1, usersRes.totalPages)
-    if (statsRes) stats.value = statsRes
-  } catch (err: any) {
-    toast.error(err?.message ?? 'Kullanıcı rolleri yüklenemedi.')
+    const res = await fetchAdminUsers(next, PAGE_SIZE, search.value)
+    users.value = res.items
+    page.value = res.page
+    total.value = res.total
+    totalPages.value = Math.max(1, res.totalPages)
+    loadedOnce.value = true
+  } catch (e: any) {
+    error.value = e?.message ?? 'Kullanıcılar yüklenemedi.'
   } finally {
     loading.value = false
   }
 }
 
-function submitSearch() {
-  activeSearch.value = searchInput.value.trim()
+function onSearch(value: string) {
+  search.value = value
   loadUsers(1)
 }
 
-function clearSearch() {
-  searchInput.value = ''
-  activeSearch.value = ''
+async function change(u: User) {
+  const next = u.roles.includes('admin') ? 'user' : 'admin'
+  const ok = await ask(roleChangePrompt(u, next, () => adminUpdateUserRole(u.id, next)))
+  if (!ok) return
+  toast.success(next === 'admin' ? `${u.email} artık yönetici.` : `${u.email} artık standart kullanıcı.`)
+  loadTeam()
+  loadUsers()
+}
+
+onMounted(() => {
+  loadTeam()
   loadUsers(1)
-}
-
-function openRoleModal(u: User) {
-  if (u.roles.includes('owner')) return
-  pendingRoleUser.value = u
-}
-
-async function confirmRoleChange() {
-  const target = pendingRoleUser.value
-  if (!target || target.roles.includes('owner')) return
-  const nextRole = target.roles.includes('admin') ? 'user' : 'admin'
-
-  savingRole.value = true
-  try {
-    const updated = await adminUpdateUserRole(target.id, nextRole)
-    const idx = users.value.findIndex((u) => u.id === target.id)
-    if (idx !== -1) users.value[idx] = updated
-    pendingRoleUser.value = null
-    toast.success(
-      `${updated.email} rolü '${nextRole === 'admin' ? 'Admin' : 'Kullanıcı'}' olarak güncellendi.`
-    )
-  } catch (err: any) {
-    toast.error(err?.message ?? 'Rol güncellenemedi.')
-  } finally {
-    savingRole.value = false
-  }
-}
-
-onMounted(() => loadUsers(1))
+})
 </script>
 
 <template>
-  <DashboardPageHeader
-    title="Roller & yetkiler"
-    description="Kullanıcı profillerini incele veya onay adımıyla yönetici yetkisi ata."
-  >
-    <template #actions>
-      <UiButton variant="secondary" :disabled="loading" @click="loadUsers(page)">
-        <UiIcon name="refresh" :size="15" /> Yenile
-      </UiButton>
-    </template>
-  </DashboardPageHeader>
+  <div>
+    <AdminHeader title="Roller" note="Yalnızca sistem sahibi görür" refreshable :loading="loading || teamLoading" @refresh="loadTeam(), loadUsers()" />
 
-  <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-    <DashboardStatTile
-      label="Toplam kullanıcı"
-      :value="stats ? stats.totalUsers.toLocaleString('tr-TR') : total.toLocaleString('tr-TR')"
-    />
-    <DashboardStatTile
-      label="Sayfadaki admin"
-      :value="adminCountOnPage"
-    />
-    <DashboardStatTile
-      label="Owner"
-      value="1"
-      note="Sabit tek hesap"
-    />
-    <DashboardStatTile
-      label="Roller"
-      value="owner / admin / user"
-    />
-  </div>
-
-  <div class="mt-8 rounded-lg border-[1.5px] border-ink bg-card p-5 shadow-hard">
-    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-      <form class="flex flex-1 flex-wrap items-center gap-2" @submit.prevent="submitSearch">
-        <div class="relative min-w-56 flex-1">
-          <UiIcon name="search" :size="15" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
-          <input
-            v-model="searchInput"
-            type="search"
-            placeholder="E-posta veya ad soyad ile ara..."
-            class="w-full rounded-sm border-[1.5px] border-ink bg-paper py-2 pl-9 pr-3 text-sm text-ink placeholder:text-ink-3 focus:outline-none focus:ring-2 focus:ring-accent"
-          />
-        </div>
-        <UiButton type="submit" :disabled="loading">Ara</UiButton>
-        <UiButton v-if="activeSearch" variant="ghost" @click="clearSearch">Temizle</UiButton>
-      </form>
-
-      <div class="flex flex-wrap gap-1.5">
-        <button
-          v-for="tab in roleTabs"
-          :key="tab.value"
-          type="button"
-          class="cursor-pointer rounded-sm border px-3 py-1.5 text-xs font-semibold transition-colors"
-          :class="
-            roleFilter === tab.value
-              ? 'border-ink bg-ink text-paper'
-              : 'border-line bg-paper text-ink-2 hover:border-ink hover:text-ink'
-          "
-          @click="roleFilter = tab.value"
-        >
-          {{ tab.label }}
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <div class="mt-6 rounded-lg border-[1.5px] border-ink bg-card shadow-hard">
-    <div v-if="loading" class="flex flex-col gap-2.5 p-5">
-      <div v-for="i in 5" :key="i" class="h-14 animate-pulse rounded-md bg-paper-2" />
-    </div>
-
-    <div v-else-if="filteredUsers.length === 0" class="p-10 text-center">
-      <p class="text-base font-semibold text-ink">Kullanıcı bulunamadı.</p>
-      <p class="mt-1 text-sm text-ink-3">Rol filtresini 'Tümü' yap veya başka bir arama dene.</p>
-    </div>
-
-    <ul v-else class="divide-y divide-line">
-      <li v-for="u in filteredUsers" :key="u.id" class="p-4 transition-colors hover:bg-paper/60 sm:p-5">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <NuxtLink :to="`/dashboard/admin/users/${u.id}`" class="group min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-base font-bold text-ink group-hover:text-accent group-hover:underline">
-                {{ u.name || 'İsimsiz Kullanıcı' }}
-              </span>
-              <span class="font-mono text-xs text-ink-2">{{ u.email }}</span>
-              <UiBadge :tone="roleBadgeMeta(u.roles).tone">{{ roleBadgeMeta(u.roles).label }}</UiBadge>
-              <UiBadge :tone="u.isActive ? 'ok' : 'accent'">
-                {{ u.isActive ? 'Aktif' : 'Askıda' }}
-              </UiBadge>
+    <div class="grid grid-cols-1 items-start gap-x-10 gap-y-12 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+      <section>
+        <h2 class="mb-4 flex items-baseline gap-3 text-lg font-semibold">
+          Yönetim ekibi
+          <span v-if="!teamLoading" class="tnum text-base font-normal text-ink-3">{{ team.length }} kişi</span>
+        </h2>
+        <UiLoadError v-if="teamError" :message="teamError" :loading="teamLoading" @retry="loadTeam" />
+        <AdminTableSkeleton v-else-if="teamLoading && team.length === 0" :rows="3" label="Yönetim ekibi yükleniyor" />
+        <ul v-else class="divide-y divide-line border border-line bg-surface transition-opacity" :class="teamLoading ? 'opacity-55' : ''">
+          <li v-for="u in team" :key="u.id" class="flex flex-wrap items-center gap-3 px-4 py-3.5">
+            <AdminAvatar :name="u.name" :email="u.email" />
+            <div class="min-w-0 flex-1">
+              <NuxtLink :to="`/dashboard/admin/users/${u.id}`" class="block truncate font-semibold hover:text-brand">{{ u.name || 'İsimsiz' }}</NuxtLink>
+              <p class="truncate text-sm text-ink-3">{{ u.email }}</p>
             </div>
-            <p class="mt-1 font-mono text-[11px] text-ink-3">
-              Paket: {{ u.plan.name }} • {{ u.linkCount }} link • Kayıt: {{ formatDateTr(u.createdAt) }}
-            </p>
-          </NuxtLink>
+            <UiTag v-if="u.roles.includes('owner')" tone="mark" icon="key">Sahip</UiTag>
+            <UiButton v-else variant="danger" size="sm" @click="change(u)">Yetkiyi kaldır</UiButton>
+          </li>
+        </ul>
+        <p class="mt-3 text-sm text-ink-3">Sistemde tek sahip olur; bu rol devredilemez.</p>
+      </section>
 
-          <div class="flex shrink-0 flex-wrap items-center gap-2">
-            <UiButton :to="`/dashboard/admin/users/${u.id}`" variant="ghost">
-              Profili aç
-            </UiButton>
-
-            <UiBadge v-if="u.roles.includes('owner')" tone="accent">
-              <UiIcon name="lock" :size="11" /> Sabit Owner
-            </UiBadge>
-            <UiButton
-              v-else
-              variant="secondary"
-              @click="openRoleModal(u)"
-            >
-              Rolü değiştir...
-            </UiButton>
-          </div>
+      <section>
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 class="text-lg font-semibold">Yönetici ata</h2>
+          <UiSearchBox id="role-search" placeholder="Ad veya e-posta" :active="search" :loading="loading" @search="onSearch" />
         </div>
-      </li>
-    </ul>
+        <UiLoadError v-if="error" :message="error" :loading="loading" @retry="loadUsers()" />
+        <AdminTableSkeleton v-else-if="!loadedOnce" :rows="6" label="Kullanıcılar yükleniyor" />
+        <UiEmpty v-else-if="users.length === 0" icon="search" title="Eşleşen kullanıcı yok" class="border border-line bg-surface" />
+        <template v-else>
+          <ul class="divide-y divide-line border border-line bg-surface transition-opacity" :class="loading ? 'pointer-events-none opacity-55' : ''" :aria-busy="loading">
+            <li v-for="u in users" :key="u.id" class="flex min-h-16 flex-wrap items-center gap-3 px-4 py-2.5">
+              <div class="min-w-0 flex-1">
+                <NuxtLink :to="`/dashboard/admin/users/${u.id}`" class="block truncate font-medium hover:text-brand">{{ u.name || 'İsimsiz' }}</NuxtLink>
+                <p class="truncate text-sm text-ink-3">{{ u.email }}</p>
+              </div>
+              <UiStatus v-if="!u.isActive" tone="danger" label="Askıda" />
+              <UiTag v-if="roleMeta(u.roles).primary !== 'user'" :tone="roleMeta(u.roles).tone">{{ roleMeta(u.roles).label }}</UiTag>
+              <UiButton v-else variant="outline" size="sm" @click="change(u)">Yönetici yap</UiButton>
+            </li>
+          </ul>
+          <UiPagination :page="page" :total-pages="totalPages" :total="total" :page-size="PAGE_SIZE" :loading="loading" item-label="kullanıcı" @change="loadUsers" />
+        </template>
+      </section>
+    </div>
   </div>
-
-  <DashboardPaginationBar
-    :page="page"
-    :total-pages="totalPages"
-    :total="total"
-    :page-size="PAGE_SIZE"
-    :loading="loading"
-    item-label="kullanıcı"
-    @change="loadUsers"
-  />
-
-  <UiConfirmModal
-    v-if="pendingRoleUser"
-    :open="Boolean(pendingRoleUser)"
-    :title="pendingRoleUser.roles.includes('admin') ? 'Admin yetkisini kaldır' : 'Admin yetkisi ver'"
-    :target-label="`${pendingRoleUser.name || 'Kullanıcı'} (${pendingRoleUser.email})`"
-    :description="
-      pendingRoleUser.roles.includes('admin')
-        ? 'Bu kullanıcının yönetici yetkileri kaldırılacak ve standart kullanıcı rolüne düşürülecek.'
-        : 'Bu kullanıcı tüm linkleri, tıklama loglarını ve standart kullanıcı hesaplarını yönetebilecek Admin yetkisine yükseltilecek.'
-    "
-    :changes="[
-      {
-        label: 'Rol',
-        from: pendingRoleUser.roles.includes('admin') ? 'ADMİN' : 'KULLANICI',
-        to: pendingRoleUser.roles.includes('admin') ? 'KULLANICI' : 'ADMİN'
-      }
-    ]"
-    :confirm-label="pendingRoleUser.roles.includes('admin') ? 'Yetkiyi kaldır' : 'Evet, Admin yap'"
-    variant="danger"
-    :loading="savingRole"
-    @cancel="pendingRoleUser = null"
-    @confirm="confirmRoleChange"
-  />
 </template>

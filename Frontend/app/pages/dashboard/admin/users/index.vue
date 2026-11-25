@@ -1,167 +1,113 @@
 <script setup lang="ts">
 import type { User } from '~/types/auth'
-import type { AdminStatsResponse } from '~/types/link'
 
-definePageMeta({ layout: 'dashboard', middleware: 'auth', roles: ['admin', 'owner'] })
-useHead({ title: 'Kullanıcılar — Yönetici — makeiTiny' })
+definePageMeta({ layout: 'admin', middleware: 'auth', roles: ['admin', 'owner'] })
+useHead({ title: 'Kullanıcılar | Yönetim | makeiTiny' })
 
-const { fetchAdminStats, fetchAdminUsers } = useAdmin()
-const toast = useToast()
+const PAGE_SIZE = 20
+const route = useRoute()
+const router = useRouter()
+const { fetchAdminUsers } = useAdmin()
 
-const PAGE_SIZE = 15
-
-const stats = ref<AdminStatsResponse | null>(null)
 const users = ref<User[]>([])
 const page = ref(1)
 const total = ref(0)
 const totalPages = ref(1)
 const loading = ref(true)
+const loadedOnce = ref(false)
+const error = ref('')
+const search = ref(String(route.query.ara ?? ''))
 
-const searchInput = ref('')
-const activeSearch = ref('')
-
-async function loadUsers(targetPage = page.value) {
+async function load(next = page.value) {
   loading.value = true
+  error.value = ''
   try {
-    const [usersRes, statsRes] = await Promise.all([
-      fetchAdminUsers(targetPage, PAGE_SIZE, activeSearch.value),
-      fetchAdminStats().catch(() => null)
-    ])
-    users.value = usersRes.items
-    page.value = usersRes.page
-    total.value = usersRes.total
-    totalPages.value = Math.max(1, usersRes.totalPages)
-    if (statsRes) stats.value = statsRes
-  } catch (err: any) {
-    toast.error(err?.message ?? 'Kullanıcı listesi alınamadı.')
+    const res = await fetchAdminUsers(next, PAGE_SIZE, search.value)
+    users.value = res.items
+    page.value = res.page
+    total.value = res.total
+    totalPages.value = Math.max(1, res.totalPages)
+    loadedOnce.value = true
+  } catch (e: any) {
+    error.value = e?.message ?? 'Kullanıcılar yüklenemedi.'
   } finally {
     loading.value = false
   }
 }
 
-function submitSearch() {
-  activeSearch.value = searchInput.value.trim()
-  loadUsers(1)
+function onSearch(value: string) {
+  search.value = value
+  router.replace({ query: value ? { ara: value } : {} })
+  load(1)
 }
 
-function clearSearch() {
-  searchInput.value = ''
-  activeSearch.value = ''
-  loadUsers(1)
-}
-
-onMounted(() => loadUsers(1))
+onMounted(() => load(1))
 </script>
 
 <template>
-  <DashboardPageHeader
-    title="Kullanıcılar"
-    description="Profil detaylarını, linklerini ve paket ayarlarını görüntülemek için bir kullanıcıya tıkla."
-  >
-    <template #actions>
-      <UiButton variant="secondary" :disabled="loading" @click="loadUsers(page)">
-        <UiIcon name="refresh" :size="15" /> Yenile
-      </UiButton>
-    </template>
-  </DashboardPageHeader>
-
-  <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-    <DashboardStatTile
-      label="Toplam kullanıcı"
-      :value="stats ? stats.totalUsers.toLocaleString('tr-TR') : total.toLocaleString('tr-TR')"
-    />
-    <DashboardStatTile
-      label="Aktif hesap"
-      :value="stats ? stats.activeUsers.toLocaleString('tr-TR') : '...'"
-    />
-    <DashboardStatTile
-      label="Askıdaki hesap"
-      :value="stats ? Math.max(0, stats.totalUsers - stats.activeUsers).toLocaleString('tr-TR') : '...'"
-    />
-    <DashboardStatTile
-      label="Listelenen"
-      :value="total.toLocaleString('tr-TR')"
-      :note="activeSearch ? `'${activeSearch}'` : undefined"
-    />
-  </div>
-
-  <form
-    class="mt-8 flex flex-wrap items-center gap-2 rounded-lg border-[1.5px] border-ink bg-card p-5 shadow-hard"
-    @submit.prevent="submitSearch"
-  >
-    <div class="relative min-w-60 flex-1">
-      <UiIcon name="search" :size="15" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
-      <input
-        v-model="searchInput"
-        type="search"
-        placeholder="E-posta veya ad soyad ile ara..."
-        class="w-full rounded-sm border-[1.5px] border-ink bg-paper py-2 pl-9 pr-3 text-sm text-ink placeholder:text-ink-3 focus:outline-none focus:ring-2 focus:ring-accent"
+  <div>
+    <AdminHeader title="Kullanıcılar" :note="loadedOnce ? `${formatNumber(total)} kayıt` : ''" refreshable :loading="loading" @refresh="load()">
+      <UiSearchBox
+        id="admin-user-search"
+        class="sm:w-96"
+        placeholder="Ad, e-posta veya kimlik"
+        :active="search"
+        :loading="loading"
+        @search="onSearch"
       />
-    </div>
-    <UiButton type="submit" :disabled="loading">Ara</UiButton>
-    <UiButton v-if="activeSearch" variant="ghost" @click="clearSearch">Temizle</UiButton>
-  </form>
+    </AdminHeader>
 
-  <div class="mt-6 rounded-lg border-[1.5px] border-ink bg-card shadow-hard">
-    <div v-if="loading" class="flex flex-col gap-2.5 p-5">
-      <div v-for="i in 5" :key="i" class="h-14 animate-pulse rounded-md bg-paper-2" />
-    </div>
+    <UiLoadError v-if="error" :message="error" :loading="loading" @retry="load()" />
+    <AdminTableSkeleton v-else-if="!loadedOnce" :rows="10" label="Kullanıcılar yükleniyor" />
+    <UiEmpty v-else-if="users.length === 0" icon="search" title="Eşleşen kullanıcı yok" text="Başka bir ad veya e-posta dene." class="border border-line bg-surface" />
 
-    <div v-else-if="users.length === 0" class="p-10 text-center">
-      <p class="text-base font-semibold text-ink">Kullanıcı bulunamadı.</p>
-      <p class="mt-1 text-sm text-ink-3">Farklı bir isim veya e-posta adresi ile ara.</p>
-    </div>
-
-    <ul v-else class="divide-y divide-line">
-      <li v-for="u in users" :key="u.id">
-        <NuxtLink
-          :to="`/dashboard/admin/users/${u.id}`"
-          class="group flex flex-col gap-3 p-4 transition-colors hover:bg-paper/60 sm:flex-row sm:items-center sm:justify-between sm:p-5"
-        >
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-base font-bold text-ink group-hover:text-accent group-hover:underline">
-                {{ u.name || 'İsimsiz Kullanıcı' }}
-              </span>
-              <span class="font-mono text-xs text-ink-2">{{ u.email }}</span>
-              <UiBadge :tone="roleBadgeMeta(u.roles).tone">{{ roleBadgeMeta(u.roles).label }}</UiBadge>
-              <UiBadge :tone="u.isActive ? 'ok' : 'accent'">
-                {{ u.isActive ? 'Aktif' : 'Banlı / Askıda' }}
-              </UiBadge>
-            </div>
-
-            <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-ink-3">
-              <span>ID: {{ u.id }}</span>
-              <span>Paket: <strong class="text-ink-2">{{ u.plan.name }}</strong></span>
-              <span>Bitiş: {{ u.planExpiresAt ? formatDateTr(u.planExpiresAt) : 'Süresiz' }}</span>
-              <span>Kayıt: {{ formatDateTr(u.createdAt) }}</span>
-              <span v-if="!u.isActive && u.banReason" class="text-accent-dark">Sebep: {{ u.banReason }}</span>
-            </div>
-          </div>
-
-          <div class="flex shrink-0 items-center gap-4">
-            <div class="text-right">
-              <span class="block font-display text-lg font-bold leading-none text-ink">
-                {{ u.linkCount.toLocaleString('tr-TR') }}
-              </span>
-              <span class="text-xs text-ink-3">link</span>
-            </div>
-            <span class="inline-flex items-center gap-1 rounded-sm border border-line bg-paper px-2.5 py-1 text-xs font-semibold text-ink-2 transition-colors group-hover:border-ink group-hover:text-ink">
-              Profili aç <UiIcon name="arrow" :size="13" />
-            </span>
-          </div>
-        </NuxtLink>
-      </li>
-    </ul>
+    <template v-else>
+      <div class="overflow-x-auto border border-line bg-surface transition-opacity" :class="loading ? 'pointer-events-none opacity-55' : ''" :aria-busy="loading">
+        <table class="w-full min-w-[54rem] text-left text-sm">
+          <caption class="sr-only">Platformdaki kullanıcılar</caption>
+          <thead class="bg-sunken text-ink-2">
+            <tr>
+              <th class="px-4 py-2.5 font-medium">Kullanıcı</th>
+              <th class="px-4 py-2.5 font-medium">Rol</th>
+              <th class="px-4 py-2.5 font-medium">Durum</th>
+              <th class="px-4 py-2.5 font-medium">Paket</th>
+              <th class="px-4 py-2.5 text-right font-medium">Link</th>
+              <th class="px-4 py-2.5 font-medium">Kayıt</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-line">
+            <tr v-for="u in users" :key="u.id" class="relative hover:bg-brand-soft/40">
+              <td class="max-w-sm px-4 py-3">
+                <div class="flex items-center gap-3">
+                  <AdminAvatar :name="u.name" :email="u.email" />
+                  <div class="min-w-0">
+                    <NuxtLink
+                      :to="`/dashboard/admin/users/${u.id}`"
+                      class="block truncate font-semibold after:absolute after:inset-0 after:content-[''] hover:text-brand"
+                    >{{ u.name || 'İsimsiz' }}</NuxtLink>
+                    <p class="truncate text-ink-3">{{ u.email }}</p>
+                  </div>
+                </div>
+              </td>
+              <td class="px-4 py-3">
+                <UiTag v-if="roleMeta(u.roles).primary !== 'user'" :tone="roleMeta(u.roles).tone">{{ roleMeta(u.roles).label }}</UiTag>
+                <span v-else class="text-ink-2">Kullanıcı</span>
+              </td>
+              <td class="max-w-56 px-4 py-3">
+                <UiStatus :tone="u.isActive ? 'ok' : 'danger'" :label="u.isActive ? 'Aktif' : 'Askıda'" />
+                <p v-if="!u.isActive && u.banReason" class="truncate text-ink-3" :title="u.banReason">{{ u.banReason }}</p>
+              </td>
+              <td class="px-4 py-3">
+                {{ u.plan.name }}
+                <p v-if="u.planExpiresAt" class="tnum text-ink-3">{{ formatDateTr(u.planExpiresAt) }} biter</p>
+              </td>
+              <td class="tnum px-4 py-3 text-right font-semibold">{{ formatNumber(u.linkCount) }}</td>
+              <td class="tnum whitespace-nowrap px-4 py-3 text-ink-2">{{ formatDateTr(u.createdAt) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <UiPagination :page="page" :total-pages="totalPages" :total="total" :page-size="PAGE_SIZE" :loading="loading" item-label="kullanıcı" @change="load" />
+    </template>
   </div>
-
-  <DashboardPaginationBar
-    :page="page"
-    :total-pages="totalPages"
-    :total="total"
-    :page-size="PAGE_SIZE"
-    :loading="loading"
-    item-label="kullanıcı"
-    @change="loadUsers"
-  />
 </template>

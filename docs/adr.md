@@ -188,3 +188,19 @@ Bu doküman, MakeItTiny projesinin geliştirilme sürecinde alınan temel mimari
   * Write-behind mimarisi ve Redis pipeline yönlendirme gecikmesini milisaniye seviyesinde sabitlerken, atomik `RENAME` yarış durumunu (race condition) ortadan kaldırır.
   * 15 dk Access + rotating HttpOnly Refresh Token yapısı XSS kaynaklı uzun süreli token sızıntısı ve anlık yetki iptali sorununu çözer.
   * İkili dosya (QR PNG) depolamasının dosya sisteminde tutulması PostgreSQL şişmesini engeller.
+
+---
+
+### ADR-013: Frontend Tasarım Sistemi (Kesim Matı) ve Ayrı Çalışma Alanları
+
+* **Durum:** Kabul Edildi
+* **Bağlam:** Arayüzde bütün sayfalar aynı kutu ve buton düzenini kullanıyor, kullanıcı ve yönetim özellikleri ayırt edilemiyor, renkler aydınlık ve karanlık temada uyuşmuyor, önemli işlemlerin bir kısmı onaysız çalışıyordu. Tailwind `dark:` sınıfları temayı değil işletim sistemini dinliyordu.
+* **Karar:**
+  1. **Tasarım dili:** Ürün bir linki "kesip kısalttığı" için marka dünyası kesim matı, cetvel ve kâğıt şerit olarak belirlendi. Renkler `main.css` içinde anlamsal token olarak tanımlandı (`ground`, `surface`, `ink`, `brand`, `mat`, `mark`, `ok`, `warn`, `danger`), metin çiftleri dört temada da WCAG AA kontrastını sağlar. `dark:` sınıfları `html.dark` sınıfına bağlandı.
+  2. **İki ayrı panel:** `layouts/dashboard.vue` (yeşil, yan menü) kullanıcı panelidir. `layouts/admin.vue` (mavi mat, yatay üst menü, yoğun tablolar) yönetim panelidir ve `html[data-space="admin"]` ile kendi renklerini alır. Owner sayfaları yönetim panelinin sarı bölümüdür. URL yapısı değişmedi. `useSpace` iki panel arasında geçer ve her panelin son sayfasını hatırlar.
+  3. **Onay kuralı:** Geri alınamayan veya başkalarını etkileyen her işlem `useConfirm` ile onaylatılır; pencere değişiklik listesini ve sonuçları gösterir. Hesap silme ve yönetici link silme, adın yazılmasını ister. Kaydedilmemiş değişiklikte çıkış `useUnsavedGuard` ile sorulur.
+  4. **Sabit yerleşim:** Koşullu alanlar yerlerini baştan ayırır; hata ve ipucu aynı satırı kullanır, butonlar yüklenirken genişliğini korur.
+  5. **Analiz kapsamı:** Link grafikleri tek sayfadaki 20 kayıttan değil, en yeni 500 ziyaretten hesaplanır. Kapsam aşılırsa ekranda belirtilir.
+* **Gerekçe:**
+  * Panelin iskeleti ve rengi birlikte değiştiği için hangi yetkiyle çalışıldığı bakar bakmaz anlaşılır.
+  * Ortak onay ve form bileşenleri sayfalar arasındaki davranış farkını ortadan kaldırır.

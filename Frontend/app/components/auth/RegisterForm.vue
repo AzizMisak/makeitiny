@@ -4,26 +4,34 @@ const { resetLinks } = useLinks()
 
 const email = ref('')
 const password = ref('')
-const errorMsg = ref('')
+const errors = ref<{ email?: string; password?: string }>({})
+const formError = ref('')
 const loading = ref(false)
 
+watch([email, password], () => {
+  errors.value = {}
+  formError.value = ''
+})
+
+const emailHint = computed(() => {
+  const name = email.value.trim().split('@')[0]
+  return name && email.value.includes('@') ? `Adın ${name} olarak kaydedilir.` : 'Adın, @ işaretinden önceki kısım olur.'
+})
+
 async function submit() {
-  errorMsg.value = ''
-  if (!email.value.trim().includes('@')) {
-    errorMsg.value = 'Geçerli bir e-posta adresi giriniz.'
-    return
+  errors.value = {
+    email: /^\S+@\S+$/.test(email.value.trim()) ? undefined : 'Geçerli bir e-posta yaz.',
+    password: password.value.length >= 4 ? undefined : 'En az 4 karakter yaz.'
   }
-  if (password.value.length < 4) {
-    errorMsg.value = 'Parola en az 4 karakter olmalıdır.'
-    return
-  }
+  if (errors.value.email || errors.value.password) return
+
   loading.value = true
   try {
     resetLinks()
     await register({ email: email.value, password: password.value })
     await navigateTo('/dashboard')
   } catch (e: any) {
-    errorMsg.value = e?.message ?? 'Kayıt oluşturulamadı.'
+    formError.value = e?.message ?? 'Hesap açılamadı. Tekrar dene.'
   } finally {
     loading.value = false
   }
@@ -31,20 +39,9 @@ async function submit() {
 </script>
 
 <template>
-  <form class="flex flex-col gap-5" @submit.prevent="submit">
-    <p v-if="errorMsg" class="rounded-md border border-accent-dark bg-accent-soft px-3 py-2 text-sm text-accent-dark">
-      {{ errorMsg }}
-    </p>
-    <UiField id="register-email" v-model="email" label="E-posta" type="email" placeholder="sen@ornek.com" autocomplete="email" />
-    <UiField
-      id="register-password"
-      v-model="password"
-      label="Parola"
-      type="password"
-      placeholder="En az 4 karakter"
-      hint="En az 4 karakter. Kullanıcı adın otomatik olarak e-postanın @ öncesi olarak atanır."
-      autocomplete="new-password"
-    />
-    <UiButton type="submit" block>{{ loading ? 'Hesap oluşturuluyor...' : 'Hesap oluştur' }}</UiButton>
+  <form class="flex flex-col gap-1" novalidate @submit.prevent="submit">
+    <UiField id="register-email" v-model="email" label="E-posta" type="email" autocomplete="email" placeholder="sen@ornek.com" :hint="emailHint" :error="errors.email" :disabled="loading" />
+    <UiField id="register-password" v-model="password" label="Parola" type="password" autocomplete="new-password" hint="En az 4 karakter" :error="errors.password || formError" :disabled="loading" />
+    <UiButton type="submit" block size="lg" class="mt-1" :loading="loading" loading-label="Hesap açılıyor">Hesap aç</UiButton>
   </form>
 </template>

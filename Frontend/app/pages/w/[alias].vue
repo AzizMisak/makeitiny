@@ -1,145 +1,104 @@
 <script setup lang="ts">
 import type { LinkPreview } from '~/types/link'
 
-definePageMeta({ layout: 'marketing' })
+definePageMeta({ layout: 'visitor' })
 
 const route = useRoute()
 const { public: config } = useRuntimeConfig()
+const { display } = useShortUrl()
 const alias = computed(() => String(route.params.alias ?? ''))
 
-useHead({ title: () => `Yönlendiriliyor (${alias.value}) — makeiTiny` })
+useHead({ title: () => `Yönlendiriliyor: ${alias.value} | makeiTiny` })
 
 const loading = ref(true)
-const errorMsg = ref('')
-const targetUrl = ref('')
-const totalSeconds = ref(0)
-const remainingSeconds = ref(0)
+const error = ref('')
+const target = ref('')
+const total = ref(0)
+const left = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
 
-function clearTimer() {
-  if (timer) {
-    clearInterval(timer)
-    timer = null
-  }
+const progress = computed(() => (total.value > 0 ? (left.value / total.value) * 100 : 0))
+
+function stop() {
+  if (timer) clearInterval(timer)
+  timer = null
 }
 
-function goToTarget() {
-  if (!targetUrl.value || remainingSeconds.value > 0) return
-  window.location.href = targetUrl.value
+function go() {
+  if (target.value && left.value <= 0) window.location.href = target.value
 }
 
-async function initWaitPage() {
+async function start() {
+  stop()
   loading.value = true
-  errorMsg.value = ''
+  error.value = ''
   try {
     const preview = await $fetch<LinkPreview>(`${config.routerBase}/${alias.value}/preview`)
     if (preview.locked) {
       await navigateTo(`/unlock/${alias.value}`, { replace: true })
       return
     }
-
-    targetUrl.value = preview.target
-    const secs = preview.waitEnabled && preview.waitSeconds > 0 ? preview.waitSeconds : 0
-    totalSeconds.value = secs
-    remainingSeconds.value = secs
-
-    if (secs <= 0 && preview.target) {
-      window.location.href = preview.target
+    target.value = preview.target
+    total.value = preview.waitEnabled && preview.waitSeconds > 0 ? preview.waitSeconds : 0
+    left.value = total.value
+    if (left.value <= 0) {
+      go()
       return
     }
-
     timer = setInterval(() => {
-      if (remainingSeconds.value > 1) {
-        remainingSeconds.value -= 1
-      } else {
-        remainingSeconds.value = 0
-        clearTimer()
-        if (targetUrl.value) {
-          window.location.href = targetUrl.value
-        }
+      left.value = Math.max(0, left.value - 1)
+      if (left.value === 0) {
+        stop()
+        go()
       }
     }, 1000)
   } catch (e: any) {
-    const code = e?.data?.code
-    if (code === 'link_not_found') {
-      await navigateTo(`/error/${alias.value}?reason=not_found`, { replace: true })
+    const reason = reasonFromCode(e?.data?.code)
+    if (reason) {
+      await navigateTo(`/error/${alias.value}?reason=${reason}`, { replace: true })
       return
     }
-    if (code === 'target_unreachable') {
-      await navigateTo(`/error/${alias.value}?reason=unreachable`, { replace: true })
-      return
-    }
-    errorMsg.value = e?.data?.message ?? 'Aradığınız kısa link bulunamadı veya önizleme bilgisi alınamadı.'
+    error.value = e?.data?.message ?? 'Link bilgisi alınamadı.'
   } finally {
     loading.value = false
   }
 }
 
-onMounted(() => {
-  initWaitPage()
-})
-
-onBeforeUnmount(() => {
-  clearTimer()
-})
+onMounted(start)
+onBeforeUnmount(stop)
 </script>
 
 <template>
-  <AuthCard
-    title="Hedef adrese yönlendiriliyorsunuz"
-    :subtitle="`/${alias} bağlantısı için lütfen bekleyin.`"
-  >
-    <div v-if="loading" class="flex items-center justify-center gap-3 py-6 text-ink-2">
-      <span class="h-5 w-5 animate-spin rounded-full border-2 border-ink border-t-transparent" />
-      <span class="text-sm font-medium">Bağlantı hazırlanıyor...</span>
+  <div class="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center px-5 pb-16">
+    <p class="break-all text-center text-ink-2"><span class="font-mono text-[15px]">{{ display(alias) }}</span></p>
+
+    <!-- Sayı, yükleme ve hata aynı alanı kullanır. -->
+    <div class="mt-2 flex min-h-56 flex-col items-center justify-center text-center" aria-live="polite">
+      <template v-if="loading">
+        <UiSpinner :size="32" class="text-brand" />
+        <p class="mt-5 text-lg text-ink-2">Link hazırlanıyor</p>
+      </template>
+      <template v-else-if="error">
+        <UiIcon name="alert" :size="36" class="text-danger" />
+        <p class="mt-4 text-lg">{{ error }}</p>
+        <UiButton variant="outline" icon="refresh" class="mt-5" @click="start">Tekrar dene</UiButton>
+      </template>
+      <template v-else>
+        <h1 class="sr-only">Hedefe yönlendiriliyorsun</h1>
+        <p class="display tnum text-[9rem] leading-none" aria-hidden="true">{{ left }}</p>
+        <p class="mt-2 text-lg text-ink-2">{{ left > 0 ? 'saniye sonra hedefe geçiyorsun' : 'Hedefe geçiliyor' }}</p>
+      </template>
     </div>
 
-    <div v-else-if="errorMsg" class="flex flex-col gap-4">
-      <p class="rounded-md border border-accent-dark bg-accent-soft px-3 py-2 text-sm text-accent-dark">
-        {{ errorMsg }}
-      </p>
-      <UiButton to="/" variant="secondary" block>Ana sayfaya dön</UiButton>
+    <div class="mt-6 h-3 bg-sunken" aria-hidden="true">
+      <div class="h-full bg-mark transition-[width] duration-1000 ease-linear" :style="{ width: `${progress}%` }" />
     </div>
 
-    <div v-else class="flex flex-col gap-5">
-      <!-- Gelecekte reklam konulacak alan -->
-      <div class="flex min-h-[140px] flex-col items-center justify-center rounded-md border-[1.5px] border-dashed border-ink bg-paper p-5 text-center">
-        <UiBadge tone="neutral">SPONSORLU ALAN</UiBadge>
-        <p class="mt-2 text-sm font-semibold text-ink-2">Reklam Alanı</p>
-        <p class="mt-1 text-xs text-ink-3">
-          Bu alan ileride reklam ve tanıtım içerikleri için kullanılacaktır.
-        </p>
-      </div>
+    <!-- Reklam için ayrılmış alan -->
+    <div class="mt-8 flex min-h-36 items-center justify-center border border-dashed border-line-2 text-sm text-ink-3">Reklam alanı</div>
 
-      <!-- Geri sayım göstergesi -->
-      <div class="flex flex-col items-center justify-center rounded-md border border-line bg-paper-2 p-4 text-center">
-        <template v-if="remainingSeconds > 0">
-          <span class="font-display text-4xl font-extrabold text-accent">{{ remainingSeconds }}</span>
-          <span class="mt-1 text-xs font-medium text-ink-2">saniye sonra otomatik yönlendirileceksiniz...</span>
-        </template>
-        <template v-else>
-          <span class="text-sm font-bold text-ok">Süre doldu! Yönlendiriliyorsunuz...</span>
-        </template>
-      </div>
-
-      <UiButton
-        type="button"
-        block
-        :disabled="remainingSeconds > 0"
-        :class="{ 'opacity-50 cursor-not-allowed': remainingSeconds > 0 }"
-        @click="goToTarget"
-      >
-        <template v-if="remainingSeconds > 0">
-          <UiIcon name="clock" :size="16" /> Lütfen Bekleyin ({{ remainingSeconds }} sn)
-        </template>
-        <template v-else>
-          Hedef Adrese Git <UiIcon name="arrow" :size="16" />
-        </template>
-      </UiButton>
-    </div>
-
-    <template #footer>
-      <NuxtLink to="/" class="font-semibold text-accent-dark underline underline-offset-2">Ana sayfaya dön</NuxtLink>
-    </template>
-  </AuthCard>
+    <UiButton size="lg" block class="mt-8" :disabled="loading || !!error || left > 0" @click="go">
+      {{ left > 0 || loading ? 'Bekleniyor' : 'Hedefe git' }}
+    </UiButton>
+  </div>
 </template>

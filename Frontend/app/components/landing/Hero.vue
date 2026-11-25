@@ -1,87 +1,27 @@
-<script setup lang="ts">
-const { isLoggedIn } = useAuth()
-
-function scrollToSection(id: string) {
-  if (!import.meta.client) return
-  const el = document.getElementById(id)
-  if (!el) return
-  const top = Math.max(0, el.getBoundingClientRect().top + window.scrollY - 72)
-  window.scrollTo({ top, behavior: 'smooth' })
-}
-
-const highlights = [
-  { label: 'Özel Alias / Base62', desc: 'Kendi takma adın veya 6 haneli kod' },
-  { label: 'Argon2id & /w Modu', desc: 'Parola kilidi veya süreli bekletme' },
-  { label: 'QR Kod & Canlı Log', desc: 'Anında PNG QR ve cihaz/ülke analizi' }
-]
-</script>
-
 <template>
-  <section class="relative overflow-hidden border-b-[1.5px] border-ink py-14 md:py-24">
-    <div class="container-x grid items-center gap-12 lg:grid-cols-[1.08fr_0.92fr] lg:gap-14">
-      <div>
-        <div class="mb-6 inline-flex items-center gap-2 rounded-sm border-[1.5px] border-ink bg-card px-3 py-1 shadow-[2px_2px_0_var(--color-ink)]">
-          <span class="h-2 w-2 rounded-full bg-ok" />
-          <span class="font-mono text-xs font-semibold uppercase tracking-wider text-ink">
-            Redis Hızında 302 Yönlendirme · Detaylı Tıklama Analitiği
-          </span>
-        </div>
-
-        <h1 class="text-[clamp(2.65rem,6.5vw,5rem)] font-extrabold leading-[1.02]">
-          Uzun bağlantıları<br />
-          <span class="relative inline-block">
-            kontrollü kısa linklere
-            <span class="absolute inset-x-0 -bottom-1 -z-10 h-[0.22em] bg-accent/85" aria-hidden="true" />
-          </span>
-          çevir.
-        </h1>
-
-        <p class="mt-6 max-w-xl text-base leading-relaxed text-ink-2 sm:text-lg">
-          <strong class="font-semibold text-ink">makeiTiny</strong> ile uzun adresleri saniyeler içinde kısalt.
-          İster üye olmadan <strong class="font-semibold text-ink">2 günlük geçici link</strong> oluştur, ister ücretsiz hesabınla
-          <strong class="font-semibold text-ink">Argon2id şifre koruması</strong>, QR kod ve canlı cihaz/coğrafya analizi kullan.
-        </p>
-
-        <div class="mt-8 flex flex-wrap items-center gap-3.5">
-          <template v-if="isLoggedIn">
-            <UiButton to="/dashboard">
-              Panele git <UiIcon name="arrow" :size="16" />
-            </UiButton>
-            <UiButton to="/dashboard/new" variant="secondary">
-              <UiIcon name="plus" :size="16" /> Yeni link kısalt
-            </UiButton>
-          </template>
-          <template v-else>
-            <UiButton to="/auth/register">
-              Ücretsiz hesap aç <UiIcon name="arrow" :size="16" />
-            </UiButton>
-            <UiButton variant="secondary" @click="scrollToSection('hizli-kisalt')">
-              <UiIcon name="sparkle" :size="15" /> Üyeliksiz dene
-            </UiButton>
-          </template>
-
-          <button
-            type="button"
-            class="inline-flex cursor-pointer items-center gap-1.5 px-3 py-2 text-sm font-semibold text-ink-2 underline decoration-line decoration-2 underline-offset-4 transition-colors hover:text-ink hover:decoration-accent"
-            @click="scrollToSection('ozellikler')"
-          >
-            Özellikleri incele ↓
-          </button>
-        </div>
-
-        <div class="mt-10 grid gap-3 border-t border-line pt-6 sm:grid-cols-3">
-          <div
-            v-for="item in highlights"
-            :key="item.label"
-            class="rounded-md border border-line bg-card/80 px-3.5 py-2.5"
-          >
-            <p class="font-mono text-xs font-bold text-ink">{{ item.label }}</p>
-            <p class="mt-0.5 text-xs text-ink-3">{{ item.desc }}</p>
-          </div>
-        </div>
+  <section id="kisalt" class="mat-grid on-mat overflow-hidden text-on-mat">
+    <div class="container-x pb-16 pt-10 md:pb-24 md:pt-16 lg:pr-20">
+      <!-- Aynı punto, iki uç genişlik: cümle söylediğini yapar. -->
+      <h1 class="display text-[clamp(3.1rem,11.2vw,8.75rem)] leading-[0.92]">
+        <span class="block whitespace-nowrap" style="font-stretch: 130%">Uzun linki</span>
+        <span class="headline-tiny block whitespace-nowrap">kısa kes.</span>
+      </h1>
+      <div class="mt-12 md:mt-16">
+        <LandingCutter />
       </div>
-
-      <LandingHeroDemo />
     </div>
   </section>
 </template>
+
+<style scoped>
+.headline-tiny {
+  font-stretch: 50%;
+  animation: shrink 900ms cubic-bezier(0.7, 0, 0.15, 1) 250ms backwards;
+}
+
+@keyframes shrink {
+  from {
+    font-stretch: 130%;
+  }
+}
+</style>

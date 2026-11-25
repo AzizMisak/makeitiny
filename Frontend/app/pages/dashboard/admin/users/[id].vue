@@ -1,530 +1,292 @@
 <script setup lang="ts">
-import type { ConfirmChangeItem } from '~/components/ui/ConfirmModal.vue'
+import type { ConfirmChange } from '~/composables/useConfirm'
 import type { PlanItem, User } from '~/types/auth'
 import type { AdminLinkItem } from '~/types/link'
 
-definePageMeta({ layout: 'dashboard', middleware: 'auth', roles: ['admin', 'owner'] })
+definePageMeta({ layout: 'admin', middleware: 'auth', roles: ['admin', 'owner'] })
+
+type BanLength = '1d' | '7d' | '30d' | 'permanent' | 'custom'
 
 const route = useRoute()
 const { isOwner } = useAuth()
-const { public: config } = useRuntimeConfig()
-const {
-  fetchPlans,
-  fetchAdminUserById,
-  fetchAdminUserLinks,
-  adminUpdateUser,
-  adminUpdateUserRole
-} = useAdmin()
+const { fetchPlans, fetchAdminUserById, fetchAdminUserLinks, adminUpdateUser, adminUpdateUserRole } = useAdmin()
+const { ask } = useConfirm()
 const toast = useToast()
 
-const userId = computed(() => String(route.params.id ?? ''))
-const targetUser = ref<User | null>(null)
+const id = computed(() => String(route.params.id ?? ''))
+const person = ref<User | null>(null)
 const plans = ref<PlanItem[]>([])
-const userLinks = ref<AdminLinkItem[]>([])
-const pageLoading = ref(true)
-const saving = ref(false)
+const links = ref<AdminLinkItem[]>([])
+const loading = ref(true)
+const linksLoading = ref(true)
+const linksError = ref('')
+const error = ref('')
 
-const selectedPlanId = ref(1)
-const selectedPlanExpiresAt = ref('')
+const planId = ref(1)
+const planExpires = ref('')
 
-const banReasonInput = ref('')
-const banDurationPreset = ref<'permanent' | '1d' | '7d' | '30d' | 'custom'>('permanent')
-const banCustomDate = ref('')
+const banReason = ref('')
+const banLength = ref<BanLength>('7d')
+const banDate = ref('')
+const banError = ref('')
 
-const confirmPlanOpen = ref(false)
-const confirmStatusOpen = ref(false)
-const confirmRoleOpen = ref(false)
+const BAN_OPTIONS: { value: BanLength; label: string }[] = [
+  { value: '1d', label: '1 gün' },
+  { value: '7d', label: '7 gün' },
+  { value: '30d', label: '30 gün' },
+  { value: 'permanent', label: 'Süresiz' },
+  { value: 'custom', label: 'Tarih seç' }
+]
 
-useHead({
-  title: computed(() =>
-    targetUser.value ? `${targetUser.value.name || targetUser.value.email} — Kullanıcı İnceleme` : 'Kullanıcı İnceleme — makeiTiny'
-  )
-})
+useHead({ title: () => `${person.value?.name || person.value?.email || 'Kullanıcı'} | Yönetim | makeiTiny` })
 
-function displayShortUrl(alias: string): string {
-  return `${config.routerBase}/${alias}`.replace(/^https?:\/\//, '')
+function sync(u: User) {
+  person.value = u
+  planId.value = u.plan?.id ?? 1
+  planExpires.value = u.planExpiresAt ?? ''
 }
 
-function syncUserDraft(u: User) {
-  targetUser.value = u
-  selectedPlanId.value = u.plan?.id ?? 1
-  selectedPlanExpiresAt.value = u.planExpiresAt ?? ''
-  banReasonInput.value = u.banReason ?? ''
-}
-
-const canManageAccount = computed(() => {
-  const u = targetUser.value
-  if (!u) return false
-  if (isOwner.value) return true
-  return !u.roles.includes('owner') && !u.roles.includes('admin')
-})
-
-const canToggleActive = computed(() => {
-  const u = targetUser.value
-  if (!u || u.roles.includes('owner')) return false
-  return canManageAccount.value
-})
-
-const canChangeRole = computed(() => {
-  const u = targetUser.value
-  if (!u || !isOwner.value) return false
-  return !u.roles.includes('owner')
-})
-
-const computedBannedUntil = computed<string>(() => {
-  if (banDurationPreset.value === 'permanent') return ''
-  if (banDurationPreset.value === 'custom') return banCustomDate.value.trim()
-  const days = banDurationPreset.value === '1d' ? 1 : banDurationPreset.value === '7d' ? 7 : 30
-  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
-})
-
-const planChanges = computed<ConfirmChangeItem[]>(() => {
-  const u = targetUser.value
-  if (!u) return []
-  const changes: ConfirmChangeItem[] = []
-
-  if (selectedPlanId.value !== u.plan.id) {
-    const nextPlanName = plans.value.find((p) => p.id === selectedPlanId.value)?.name ?? String(selectedPlanId.value)
-    changes.push({
-      label: 'Paket',
-      from: u.plan.name,
-      to: nextPlanName
-    })
-  }
-
-  const curExp = u.planExpiresAt ?? ''
-  const nextExp = selectedPlanExpiresAt.value.trim()
-  if (nextExp !== curExp) {
-    changes.push({
-      label: 'Paket bitiş tarihi',
-      from: curExp ? formatDateTr(curExp) : 'Süresiz',
-      to: nextExp ? formatDateTr(nextExp) : 'Süresiz'
-    })
-  }
-
-  return changes
-})
-
-async function loadUserDetail() {
-  pageLoading.value = true
+async function loadLinks() {
+  const u = person.value
+  if (!u) return
+  linksLoading.value = true
+  linksError.value = ''
   try {
-    const [found, planList] = await Promise.all([
-      fetchAdminUserById(userId.value),
-      fetchPlans()
-    ])
-    plans.value = planList
-    if (found) {
-      syncUserDraft(found)
-      userLinks.value = await fetchAdminUserLinks(found.id, found.email).catch(() => [])
-    }
-  } catch (err: any) {
-    toast.error(err?.message ?? 'Kullanıcı bilgileri yüklenemedi.')
+    links.value = await fetchAdminUserLinks(u.id, u.email)
+  } catch (e: any) {
+    linksError.value = e?.message ?? 'Linkler yüklenemedi.'
   } finally {
-    pageLoading.value = false
+    linksLoading.value = false
   }
 }
 
-function requestPlanSave() {
-  if (!canManageAccount.value) return
-  if (planChanges.value.length === 0) {
-    toast.info('Kaydedilecek bir paket değişikliği yok.')
+async function load() {
+  loading.value = true
+  error.value = ''
+  try {
+    const [found, list] = await Promise.all([fetchAdminUserById(id.value), fetchPlans()])
+    plans.value = list
+    if (found) {
+      sync(found)
+      loadLinks()
+    }
+  } catch (e: any) {
+    error.value = e?.message ?? 'Kullanıcı bilgileri yüklenemedi.'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(load)
+
+const isTargetOwner = computed(() => !!person.value?.roles.includes('owner'))
+const isTargetAdmin = computed(() => !!person.value?.roles.includes('admin'))
+const canManage = computed(() => isOwner.value || (!isTargetOwner.value && !isTargetAdmin.value))
+const canBan = computed(() => canManage.value && !isTargetOwner.value)
+const role = computed(() => roleMeta(person.value?.roles))
+const who = computed(() => (person.value ? `${person.value.name || 'İsimsiz'} (${person.value.email})` : ''))
+
+const facts = computed(() => {
+  const u = person.value
+  if (!u) return []
+  return [
+    { label: 'Link', value: formatNumber(u.linkCount) },
+    { label: 'Paket', value: u.plan.name },
+    { label: 'Paket bitişi', value: u.planExpiresAt ? formatDateTr(u.planExpiresAt) : 'Süresiz' },
+    { label: 'Kayıt', value: formatDateTr(u.createdAt) },
+    { label: 'Kimlik', value: u.id }
+  ]
+})
+
+const planOptions = computed(() => plans.value.map((p) => ({ value: p.id, label: `${p.name}, ${formatPriceMonthly(p.priceMonthly)}` })))
+
+const planChanges = computed<ConfirmChange[]>(() => {
+  const u = person.value
+  if (!u) return []
+  const list: ConfirmChange[] = []
+  if (planId.value !== u.plan.id) {
+    list.push({ label: 'Paket', from: u.plan.name, to: plans.value.find((p) => p.id === planId.value)?.name ?? '—' })
+  }
+  const was = u.planExpiresAt ?? ''
+  if (planExpires.value !== was) {
+    list.push({ label: 'Bitiş', from: was ? formatDateTr(was) : 'Süresiz', to: planExpires.value ? formatDateTr(planExpires.value) : 'Süresiz' })
+  }
+  return list
+})
+
+useUnsavedGuard(() => planChanges.value.length > 0)
+
+async function savePlan() {
+  const u = person.value
+  if (!u || planChanges.value.length === 0) return
+  const ok = await ask({
+    title: 'Paket değiştirilsin mi?',
+    subject: who.value,
+    message: 'Kullanıcının hakları hemen değişir.',
+    changes: planChanges.value,
+    confirmLabel: 'Paketi değiştir',
+    action: async () => sync(await adminUpdateUser(u.id, { planId: planId.value, planExpiresAt: planExpires.value }))
+  })
+  if (ok) toast.success('Paket değiştirildi.')
+}
+
+const banUntil = computed(() => {
+  if (banLength.value === 'permanent') return ''
+  if (banLength.value === 'custom') return banDate.value
+  const days = { '1d': 1, '7d': 7, '30d': 30 }[banLength.value]
+  return new Date(Date.now() + days * 86_400_000).toISOString()
+})
+
+async function ban() {
+  const u = person.value
+  if (!u || !canBan.value) return
+  banError.value = ''
+  if (banLength.value === 'custom' && !banDate.value) {
+    banError.value = 'Bir bitiş tarihi seç.'
     return
   }
-  confirmPlanOpen.value = true
-}
-
-async function confirmPlanSave() {
-  if (!targetUser.value) return
-  saving.value = true
-  try {
-    const updated = await adminUpdateUser(targetUser.value.id, {
-      planId: selectedPlanId.value,
-      planExpiresAt: selectedPlanExpiresAt.value.trim()
-    })
-    syncUserDraft(updated)
-    confirmPlanOpen.value = false
-    toast.success('Kullanıcı paketi güncellendi.')
-  } catch (err: any) {
-    toast.error(err?.message ?? 'Paket güncellenemedi.')
-  } finally {
-    saving.value = false
+  const until = banUntil.value
+  const ok = await ask({
+    title: 'Hesap askıya alınsın mı?',
+    subject: who.value,
+    message: `${until ? `${formatDateTimeTr(until)} tarihine kadar` : 'Süresiz olarak'} askıda kalır.`,
+    effects: [
+      'Açık oturumları hemen kapanır, giriş yapamaz.',
+      'Linkleri yönlendirmeyi bırakır.',
+      banReason.value.trim() ? `Gösterilecek sebep: ${banReason.value.trim()}` : 'Sebep yazılmadı.'
+    ],
+    confirmLabel: 'Hesabı askıya al',
+    tone: 'danger',
+    action: async () => sync(await adminUpdateUser(u.id, { isActive: false, banReason: banReason.value.trim(), bannedUntil: until }))
+  })
+  if (ok) {
+    banReason.value = ''
+    toast.success('Hesap askıya alındı.')
   }
 }
 
-async function confirmStatusToggle() {
-  if (!targetUser.value || !canToggleActive.value) return
-  const nextActive = !targetUser.value.isActive
-  saving.value = true
-  try {
-    const updated = await adminUpdateUser(targetUser.value.id, {
-      isActive: nextActive,
-      banReason: nextActive ? '' : banReasonInput.value.trim(),
-      bannedUntil: nextActive ? '' : computedBannedUntil.value
-    })
-    syncUserDraft(updated)
-    confirmStatusOpen.value = false
-    toast.success(
-      updated.isActive ? 'Kullanıcı yasağı kaldırıldı.' : 'Kullanıcı banlandı ve aktif oturumları kapatıldı.'
-    )
-  } catch (err: any) {
-    toast.error(err?.message ?? 'Hesap durumu güncellenemedi.')
-  } finally {
-    saving.value = false
-  }
+async function unban() {
+  const u = person.value
+  if (!u) return
+  const ok = await ask({
+    title: 'Askı kaldırılsın mı?',
+    subject: who.value,
+    message: 'Kullanıcı yeniden giriş yapabilir, linkleri yönlendirmeye başlar.',
+    confirmLabel: 'Askıyı kaldır',
+    action: async () => sync(await adminUpdateUser(u.id, { isActive: true, banReason: '', bannedUntil: '' }))
+  })
+  if (ok) toast.success('Askı kaldırıldı.')
 }
 
-async function confirmRoleToggle() {
-  if (!targetUser.value || !canChangeRole.value) return
-  const nextRole = targetUser.value.roles.includes('admin') ? 'user' : 'admin'
-  saving.value = true
-  try {
-    const updated = await adminUpdateUserRole(targetUser.value.id, nextRole)
-    syncUserDraft(updated)
-    confirmRoleOpen.value = false
-    toast.success(
-      nextRole === 'admin' ? 'Kullanıcıya Admin yetkisi verildi.' : 'Kullanıcının Admin yetkisi kaldırıldı.'
-    )
-  } catch (err: any) {
-    toast.error(err?.message ?? 'Rol güncellenemedi.')
-  } finally {
-    saving.value = false
-  }
+async function toggleRole() {
+  const u = person.value
+  if (!u || !isOwner.value || isTargetOwner.value) return
+  const next = isTargetAdmin.value ? 'user' : 'admin'
+  const ok = await ask(roleChangePrompt(u, next, async () => sync(await adminUpdateUserRole(u.id, next))))
+  if (ok) toast.success(next === 'admin' ? 'Yönetici yapıldı.' : 'Yönetici yetkisi kaldırıldı.')
 }
-
-onMounted(loadUserDetail)
 </script>
 
 <template>
   <div>
-    <div class="mb-5">
-      <NuxtLink
-        to="/dashboard/admin/users"
-        class="inline-flex items-center gap-2 text-sm font-medium text-ink-2 hover:text-ink"
-      >
-        <UiIcon name="back" /> Kullanıcılara dön
-      </NuxtLink>
+    <NuxtLink to="/dashboard/admin/users" class="mb-5 inline-flex items-center gap-2 text-sm font-medium text-ink-2 hover:text-ink">
+      <UiIcon name="back" :size="16" /> Kullanıcılar
+    </NuxtLink>
+
+    <div v-if="loading" class="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_24rem]" aria-busy="true" aria-label="Kullanıcı yükleniyor">
+      <div><div class="skeleton h-14 w-80 max-w-full" /><div class="skeleton mt-8 h-72" /></div>
+      <div class="skeleton h-96" />
     </div>
+    <UiLoadError v-else-if="error" :message="error" @retry="load" />
+    <UiEmpty v-else-if="!person" icon="user" title="Kullanıcı bulunamadı" text="Hesap silinmiş olabilir." class="border border-line bg-surface">
+      <UiButton to="/dashboard/admin/users" variant="outline">Kullanıcılara dön</UiButton>
+    </UiEmpty>
 
-    <div v-if="pageLoading" class="flex flex-col gap-4">
-      <div class="h-16 animate-pulse rounded-lg bg-paper-2" />
-      <div class="h-64 animate-pulse rounded-lg bg-paper-2" />
-    </div>
-
-    <div
-      v-else-if="!targetUser"
-      class="rounded-lg border-[1.5px] border-ink bg-card p-8 text-center shadow-hard"
-    >
-      <h1 class="text-xl font-bold">Kullanıcı bulunamadı</h1>
-      <p class="mt-1 text-sm text-ink-3">Aradığın kullanıcı mevcut değil veya silinmiş.</p>
-      <div class="mt-5">
-        <UiButton to="/dashboard/admin/users" variant="secondary">Listeye dön</UiButton>
-      </div>
-    </div>
-
-    <template v-else>
-      <DashboardPageHeader
-        :title="targetUser.name || 'İsimsiz Kullanıcı'"
-        :description="`${targetUser.email} • ID: ${targetUser.id}`"
-      />
-
-      <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-        <DashboardStatTile
-          label="Hesap durumu"
-          :value="targetUser.isActive ? 'Aktif' : 'Banlı / Askıda'"
-          :note="!targetUser.isActive && targetUser.bannedUntil ? `Bitiş: ${formatDateTimeTr(targetUser.bannedUntil)}` : undefined"
-        />
-        <DashboardStatTile
-          label="Rol"
-          :value="roleBadgeMeta(targetUser.roles).label"
-        />
-        <DashboardStatTile
-          label="Mevcut paket"
-          :value="targetUser.plan.name"
-          :note="targetUser.planExpiresAt ? `Bitiş: ${formatDateTr(targetUser.planExpiresAt)}` : 'Süresiz'"
-        />
-        <DashboardStatTile
-          label="Oluşturulan link"
-          :value="targetUser.linkCount.toLocaleString('tr-TR')"
-          :note="`Kayıt: ${formatDateTr(targetUser.createdAt)}`"
-        />
-      </div>
-
-      <div class="mt-8 grid gap-6 lg:grid-cols-2">
-        <!-- Paket Yönetimi Kartı -->
-        <form
-          class="flex flex-col justify-between rounded-lg border-[1.5px] border-ink bg-card p-6 shadow-hard"
-          @submit.prevent="requestPlanSave"
-        >
-          <div>
-            <div class="flex items-center justify-between gap-2 border-b border-line pb-4">
-              <h2 class="text-xl font-bold">Paket &amp; süre yönetimi</h2>
-              <UiBadge v-if="!canManageAccount" tone="neutral">
-                <UiIcon name="lock" :size="11" /> Korumalı
-              </UiBadge>
-            </div>
-
-            <div class="mt-5 flex flex-col gap-4">
-              <div>
-                <label for="user-plan-select" class="mb-1.5 block text-sm font-semibold text-ink">Tanımlı paket</label>
-                <select
-                  id="user-plan-select"
-                  v-model.number="selectedPlanId"
-                  :disabled="!canManageAccount"
-                  class="w-full rounded-md border-[1.5px] border-ink bg-card px-3 py-2.5 text-sm font-semibold text-ink focus:outline-none focus:ring-2 focus:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <option v-for="p in plans" :key="p.id" :value="p.id">
-                    {{ p.name }} ({{ formatPriceMonthly(p.priceMonthly) }})
-                  </option>
-                </select>
-              </div>
-
-              <div>
-                <label for="user-plan-exp" class="mb-1.5 block text-sm font-semibold text-ink">
-                  Paket bitiş tarihi (boş bırakılırsa süresiz)
-                </label>
-                <input
-                  id="user-plan-exp"
-                  v-model="selectedPlanExpiresAt"
-                  type="date"
-                  :disabled="!canManageAccount"
-                  class="w-full rounded-md border-[1.5px] border-ink bg-card px-3 py-2.5 font-mono text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div class="mt-6 flex items-center justify-between border-t border-line pt-4">
-            <span class="text-xs text-ink-3">
-              {{ planChanges.length > 0 ? `${planChanges.length} değişiklik seçildi` : 'Değişiklik yok' }}
-            </span>
-            <UiButton
-              type="submit"
-              :disabled="!canManageAccount || planChanges.length === 0 || saving"
-            >
-              Değişiklikleri incele
-            </UiButton>
-          </div>
-        </form>
-
-        <!-- Hesap Ban / Ceza ve Yetki Kartı -->
-        <div class="flex flex-col gap-6">
-          <div class="rounded-lg border-[1.5px] border-ink bg-card p-6 shadow-hard">
-            <div class="flex items-center justify-between gap-2 border-b border-line pb-4">
-              <div class="flex items-center gap-2">
-                <UiIcon name="user-x" :size="18" />
-                <h2 class="text-xl font-bold">Hesap Ban &amp; Cezalandırma</h2>
-              </div>
-              <UiBadge :tone="targetUser.isActive ? 'ok' : 'accent'">
-                {{ targetUser.isActive ? 'Aktif' : 'Banlı' }}
-              </UiBadge>
-            </div>
-
-            <p v-if="!canToggleActive" class="mt-4 text-sm text-ink-2">
-              Bu hesabın durumu mevcut yetki seviyenle değiştirilemez.
+    <div v-else class="grid grid-cols-1 items-start gap-x-8 gap-y-10 lg:grid-cols-[minmax(0,1fr)_24rem]">
+      <div class="min-w-0">
+        <header class="flex items-center gap-4">
+          <AdminAvatar :name="person.name" :email="person.email" large />
+          <div class="min-w-0">
+            <h1 class="display truncate text-[1.75rem] leading-[1.3]">{{ person.name || 'İsimsiz' }}</h1>
+            <p class="flex flex-wrap items-center gap-x-4 gap-y-1 text-ink-2">
+              <span class="truncate">{{ person.email }}</span>
+              <UiTag :tone="role.tone">{{ role.label }}</UiTag>
+              <UiStatus :tone="person.isActive ? 'ok' : 'danger'" :label="person.isActive ? 'Aktif' : 'Askıda'" />
             </p>
-
-            <template v-else-if="targetUser.isActive">
-              <p class="mt-4 text-sm text-ink-2">
-                Hesabı banladığınızda kullanıcının mevcut oturumu anında sonlandırılır ve linkleri yönlendirilmez.
-              </p>
-
-              <div class="mt-4 flex flex-col gap-3">
-                <UiField
-                  id="ban-reason"
-                  v-model="banReasonInput"
-                  label="Ban / Ceza Sebebi"
-                  type="text"
-                  placeholder="Örn. Spam veya zararlı link paylaşımı"
-                />
-
-                <div class="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label for="ban-duration" class="mb-1.5 block text-sm font-semibold">Ceza Süresi</label>
-                    <select
-                      id="ban-duration"
-                      v-model="banDurationPreset"
-                      class="w-full rounded-md border-[1.5px] border-ink bg-card px-3 py-2.5 text-sm font-semibold text-ink focus:outline-none focus:ring-2 focus:ring-accent"
-                    >
-                      <option value="permanent">Kalıcı (Süresiz)</option>
-                      <option value="1d">24 Saat (1 Gün)</option>
-                      <option value="7d">7 Gün</option>
-                      <option value="30d">30 Gün</option>
-                      <option value="custom">Özel Tarih</option>
-                    </select>
-                  </div>
-
-                  <UiField
-                    v-if="banDurationPreset === 'custom'"
-                    id="ban-custom-date"
-                    v-model="banCustomDate"
-                    label="Bitiş Tarihi"
-                    type="date"
-                  />
-                </div>
-              </div>
-
-              <div class="mt-4">
-                <UiButton variant="danger" @click="confirmStatusOpen = true">
-                  <UiIcon name="ban" :size="15" /> Kullanıcıyı Banla...
-                </UiButton>
-              </div>
-            </template>
-
-            <template v-else>
-              <div class="mt-4 rounded-md border border-accent-dark bg-accent-soft p-4 text-sm">
-                <p class="font-bold text-accent-dark">Hesap şu anda banlı / askıda</p>
-                <p v-if="targetUser.banReason" class="mt-1 text-ink">
-                  <strong>Sebep:</strong> {{ targetUser.banReason }}
-                </p>
-                <p class="mt-1 font-mono text-xs text-ink-2">
-                  <strong>Bitiş:</strong>
-                  {{ targetUser.bannedUntil ? formatDateTimeTr(targetUser.bannedUntil) : 'Süresiz (Kalıcı)' }}
-                </p>
-              </div>
-
-              <div class="mt-4">
-                <UiButton variant="primary" @click="confirmStatusOpen = true">
-                  <UiIcon name="unlock" :size="15" /> Banı Kaldır (Aktifleştir)...
-                </UiButton>
-              </div>
-            </template>
           </div>
+        </header>
 
-          <div v-if="isOwner" class="rounded-lg border-[1.5px] border-ink bg-card p-6 shadow-hard">
-            <div class="flex items-center justify-between gap-2 border-b border-line pb-4">
-              <h2 class="text-xl font-bold">Sistem rolü</h2>
-              <UiBadge :tone="roleBadgeMeta(targetUser.roles).tone">
-                {{ roleBadgeMeta(targetUser.roles).label }}
-              </UiBadge>
-            </div>
-
-            <p v-if="targetUser.roles.includes('owner')" class="mt-4 text-sm text-ink-2">
-              Sistemde tek Owner bulunur; bu rol değiştirilemez.
-            </p>
-            <template v-else>
-              <p class="mt-4 text-sm text-ink-2">
-                {{
-                  targetUser.roles.includes('admin')
-                    ? 'Bu kullanıcı yönetici yetkilerine sahip. Yetkiyi geri alarak standart kullanıcıya dönüştürebilirsin.'
-                    : 'Bu kullanıcıya yönetici (Admin) yetkisi verebilirsin.'
-                }}
-              </p>
-              <div class="mt-4">
-                <UiButton
-                  :variant="targetUser.roles.includes('admin') ? 'danger' : 'secondary'"
-                  @click="confirmRoleOpen = true"
-                >
-                  {{ targetUser.roles.includes('admin') ? 'Admin yetkisini kaldır...' : 'Admin yetkisi ver...' }}
-                </UiButton>
-              </div>
-            </template>
+        <dl class="mt-7 flex flex-wrap gap-x-10 gap-y-4">
+          <div v-for="f in facts" :key="f.label">
+            <dt class="text-[13px] text-ink-3">{{ f.label }}</dt>
+            <dd class="tnum mt-0.5 font-semibold">{{ f.value }}</dd>
           </div>
-        </div>
+        </dl>
+
+        <h2 class="mb-4 mt-10 text-lg font-semibold">Linkleri</h2>
+        <UiLoadError v-if="linksError" :message="linksError" @retry="loadLinks" />
+        <AdminTableSkeleton v-else-if="linksLoading && links.length === 0" :rows="4" label="Kullanıcının linkleri yükleniyor" />
+        <UiEmpty v-else-if="links.length === 0" title="Link oluşturmamış" class="border border-line bg-surface" />
+        <AdminLinkTable v-else :links="links" :loading="linksLoading" hide-owner actions caption="Kullanıcının linkleri" @changed="loadLinks" />
       </div>
 
-      <!-- Kullanıcının Oluşturduğu Linkler -->
-      <section class="mt-8 rounded-lg border-[1.5px] border-ink bg-card p-6 shadow-hard">
-        <div class="flex items-center justify-between gap-2 border-b border-line pb-4">
-          <h2 class="text-xl font-bold">Kullanıcının linkleri</h2>
-          <UiBadge tone="neutral">{{ userLinks.length }} link</UiBadge>
-        </div>
-
-        <p v-if="userLinks.length === 0" class="py-8 text-center text-sm text-ink-3">
-          Bu kullanıcının oluşturduğu link bulunmuyor.
+      <div class="flex flex-col divide-y divide-line border border-line bg-surface">
+        <p v-if="!canManage" class="flex items-center gap-3 px-5 py-4 text-sm text-ink-2">
+          <UiIcon name="lock" :size="17" /> Yönetici hesaplarını yalnızca sistem sahibi değiştirebilir.
         </p>
 
-        <ul v-else class="mt-2 divide-y divide-line">
-          <li v-for="item in userLinks" :key="item.id">
-            <NuxtLink
-              :to="`/dashboard/admin/links/${item.id}`"
-              class="group flex flex-wrap items-center justify-between gap-3 py-3.5 transition-colors hover:bg-paper/60"
-            >
-              <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-mono text-sm font-bold text-ink group-hover:text-accent group-hover:underline">
-                    {{ displayShortUrl(item.alias) }}
-                  </span>
-                  <span v-if="item.title" class="truncate text-xs text-ink-2">• {{ item.title }}</span>
-                  <UiBadge :tone="item.isActive ? 'ok' : 'accent'">
-                    {{ item.isActive ? 'Aktif' : 'Pasif' }}
-                  </UiBadge>
-                  <UiBadge :tone="securityStatusMeta(item.securityStatus).tone">
-                    {{ securityStatusMeta(item.securityStatus).label }}
-                  </UiBadge>
-                </div>
-                <p class="mt-0.5 truncate text-xs text-ink-3">{{ item.target }}</p>
-              </div>
+        <form class="p-5" novalidate @submit.prevent="savePlan">
+          <h2 class="text-lg font-semibold">Paket</h2>
+          <UiSelect id="user-plan" v-model="planId" class="mt-3" :options="planOptions" :disabled="!canManage" />
+          <UiField id="user-plan-exp" v-model="planExpires" class="mt-3" label="Bitiş tarihi" type="date" hint="Boşsa süresiz" :disabled="!canManage" />
+          <UiButton type="submit" variant="outline" size="sm" class="mt-2" :disabled="!canManage || planChanges.length === 0">
+            {{ planChanges.length === 0 ? 'Değişiklik yok' : 'Paketi değiştir' }}
+          </UiButton>
+        </form>
 
-              <div class="flex items-center gap-3">
-                <span class="font-mono text-xs font-bold text-ink">{{ item.clicks.toLocaleString('tr-TR') }} tıklama</span>
-                <span class="text-xs font-semibold text-ink-2 group-hover:text-ink">İncele →</span>
-              </div>
-            </NuxtLink>
-          </li>
-        </ul>
-      </section>
+        <section class="p-5">
+          <h2 class="text-lg font-semibold">Hesap durumu</h2>
+          <p v-if="!canBan" class="mt-2 text-sm text-ink-2">Bu hesap askıya alınamaz.</p>
 
-      <!-- Paket Güncelleme Onay Modalı -->
-      <UiConfirmModal
-        :open="confirmPlanOpen"
-        title="Paket değişikliklerini onayla"
-        :target-label="`${targetUser.name || 'Kullanıcı'} (${targetUser.email})`"
-        description="Kullanıcının abonelik bilgileri aşağıdaki gibi güncellenecek:"
-        :changes="planChanges"
-        confirm-label="Paketi güncelle"
-        :loading="saving"
-        @cancel="confirmPlanOpen = false"
-        @confirm="confirmPlanSave"
-      />
+          <form v-else-if="person.isActive" class="mt-3" novalidate @submit.prevent="ban">
+            <UiField id="ban-reason" v-model="banReason" label="Askı sebebi" placeholder="Spam veya zararlı link" hint="Kullanıcı giriş yaparken görür." />
+            <p class="mb-1.5 mt-2 text-sm font-semibold">Süre</p>
+            <UiSelect id="ban-length" v-model="banLength" :options="BAN_OPTIONS" />
+            <!-- Tarih alanı hep yerinde; yalnızca "Tarih seç" ile açılır. -->
+            <UiField
+              id="ban-date"
+              v-model="banDate"
+              class="mt-3"
+              type="date"
+              :min="todayIso()"
+              :disabled="banLength !== 'custom'"
+              :error="banError"
+              :hint="banLength === 'custom' ? 'Bu günün sonunda kalkar.' : 'Tarih seçmek için süreyi değiştir.'"
+            />
+            <UiButton type="submit" variant="danger" size="sm" icon="ban" class="-ml-3 mt-1">Hesabı askıya al</UiButton>
+          </form>
 
-      <!-- Hesap Ban / Aktifleştirme Onay Modalı -->
-      <UiConfirmModal
-        :open="confirmStatusOpen"
-        :title="targetUser.isActive ? 'Kullanıcıyı banla' : 'Kullanıcı banını kaldır'"
-        :target-label="`${targetUser.name || 'Kullanıcı'} (${targetUser.email})`"
-        :description="
-          targetUser.isActive
-            ? 'Bu kullanıcının hesabı banlanacak, mevcut oturumu ve refresh tokenları iptal edilecek, linkleri kapatılacak.'
-            : 'Bu kullanıcının banı kaldırılacak ve hesabı yeniden aktifleştirilecek.'
-        "
-        :changes="
-          targetUser.isActive
-            ? [
-                { label: 'Sebep', from: '—', to: banReasonInput.trim() || 'Belirtilmedi' },
-                { label: 'Süre', from: 'Aktif', to: computedBannedUntil ? formatDateTimeTr(computedBannedUntil) : 'Süresiz (Kalıcı)' }
-              ]
-            : undefined
-        "
-        :confirm-label="targetUser.isActive ? 'Evet, banla' : 'Evet, banı kaldır'"
-        :variant="targetUser.isActive ? 'danger' : 'primary'"
-        :loading="saving"
-        @cancel="confirmStatusOpen = false"
-        @confirm="confirmStatusToggle"
-      />
+          <div v-else class="mt-3">
+            <p class="text-sm text-ink-2">
+              {{ person.bannedUntil ? `${formatDateTimeTr(person.bannedUntil)} tarihine kadar askıda.` : 'Süresiz askıda.' }}
+            </p>
+            <p class="mt-1 text-sm text-ink-2">Sebep: {{ person.banReason || 'yazılmamış' }}</p>
+            <UiButton variant="outline" size="sm" icon="unlock" class="mt-4" @click="unban">Askıyı kaldır</UiButton>
+          </div>
+        </section>
 
-      <!-- Rol Değiştirme Onay Modalı -->
-      <UiConfirmModal
-        :open="confirmRoleOpen"
-        :title="targetUser.roles.includes('admin') ? 'Admin yetkisini kaldır' : 'Admin yetkisi ver'"
-        :target-label="`${targetUser.name || 'Kullanıcı'} (${targetUser.email})`"
-        :description="
-          targetUser.roles.includes('admin')
-            ? 'Bu kullanıcının yönetici yetkileri kaldırılacak ve standart kullanıcı rolüne düşürülecek.'
-            : 'Bu kullanıcı tüm linkleri, tıklama loglarını ve standart kullanıcı hesaplarını yönetebilecek Admin yetkisine yükseltilecek.'
-        "
-        :changes="[
-          {
-            label: 'Rol',
-            from: targetUser.roles.includes('admin') ? 'ADMİN' : 'KULLANICI',
-            to: targetUser.roles.includes('admin') ? 'KULLANICI' : 'ADMİN'
-          }
-        ]"
-        :confirm-label="targetUser.roles.includes('admin') ? 'Yetkiyi kaldır' : 'Evet, Admin yap'"
-        variant="danger"
-        :loading="saving"
-        @cancel="confirmRoleOpen = false"
-        @confirm="confirmRoleToggle"
-      />
-    </template>
+        <section v-if="isOwner" class="p-5">
+          <h2 class="text-lg font-semibold">Rol</h2>
+          <p class="mt-2 text-sm text-ink-2">
+            <template v-if="isTargetOwner">Sistemin tek sahibi. Bu rol değiştirilemez.</template>
+            <template v-else-if="isTargetAdmin">Bütün linkleri ve standart kullanıcıları yönetebilir.</template>
+            <template v-else>Yalnızca kendi linklerini yönetebilir.</template>
+          </p>
+          <UiButton v-if="!isTargetOwner" :variant="isTargetAdmin ? 'danger' : 'outline'" size="sm" icon="key" class="mt-4" :class="isTargetAdmin ? '-ml-3' : ''" @click="toggleRole">
+            {{ isTargetAdmin ? 'Yönetici yetkisini kaldır' : 'Yönetici yap' }}
+          </UiButton>
+        </section>
+      </div>
+    </div>
   </div>
 </template>

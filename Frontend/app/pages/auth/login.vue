@@ -1,6 +1,6 @@
 <script setup lang="ts">
-definePageMeta({ layout: 'marketing' })
-useHead({ title: 'Giriş yap — makeiTiny' })
+definePageMeta({ layout: 'auth' })
+useHead({ title: 'Giriş yap | makeiTiny' })
 
 const { isLoggedIn } = useAuth()
 if (isLoggedIn.value) {
@@ -9,11 +9,12 @@ if (isLoggedIn.value) {
 </script>
 
 <template>
-  <AuthCard title="Tekrar hoş geldin." subtitle="Linklerine ulaşmak için giriş yap.">
+  <div>
+    <h1 class="display mb-8 text-[2.5rem]">Giriş yap</h1>
     <AuthLoginForm />
-    <template #footer>
+    <p class="mt-8 text-ink-2">
       Hesabın yok mu?
-      <NuxtLink to="/auth/register" class="font-semibold text-accent-dark underline underline-offset-2">Kayıt ol</NuxtLink>
-    </template>
-  </AuthCard>
+      <NuxtLink to="/auth/register" class="font-semibold text-brand-ink underline underline-offset-4">Hesap aç</NuxtLink>
+    </p>
+  </div>
 </template>

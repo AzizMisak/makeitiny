@@ -1,79 +1,152 @@
 @import 'tailwindcss';
 
+/* Tema sınıfla (html.dark) yönetilir; Tailwind'in varsayılanı işletim sistemine bakar. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Tasarım dünyası: kesim matı.
+ *  - mat   : markanın zemini (yeşil = kullanıcı, mavi = yönetim)
+ *  - mark  : cetvel sarısı, yalnızca vurgu
+ *  - şerit : linkler, matın üstündeki kâğıt şeritler
+ */
 @theme {
-  --color-paper: #f5f1e8;
-  --color-paper-2: #ece6d8;
-  --color-card: #fffdf8;
-  --color-ink: #1b1a17;
-  --color-ink-2: #57534b;
-  --color-ink-3: #8a857a;
-  --color-line: #d9d2c1;
-  --color-accent: #e5481f;
-  --color-accent-dark: #c23a15;
-  --color-accent-soft: #fbe3da;
-  --color-ok: #2f7a4b;
-  --color-ok-soft: #dcefe2;
+  --color-ground: #eff4f1;
+  --color-surface: #ffffff;
+  --color-sunken: #e3ebe6;
+  --color-ink: #10211b;
+  --color-ink-2: #3f5249;
+  --color-ink-3: #5a6d64;
+  --color-line: #d0dbd5;
+  --color-line-2: #7f9389;
 
-  --color-ws-personal: #e5481f;
-  --color-ws-personal-soft: #fbe3da;
-  --color-ws-admin: #d97706;
-  --color-ws-admin-soft: #fef3c7;
-  --color-ws-owner: #7c3aed;
-  --color-ws-owner-soft: #ede9fe;
+  --color-brand: #0d6a50;
+  --color-brand-hover: #0a5540;
+  --color-on-brand: #ffffff;
+  --color-brand-soft: #d6ecdf;
+  --color-brand-ink: #0a5540;
 
-  --font-display: 'Bricolage Grotesque', system-ui, sans-serif;
-  --font-sans: 'Instrument Sans', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --color-mat: #0c5c47;
+  --color-mat-2: #0a4d3b;
+  --color-on-mat: #ffffff;
+  --color-on-mat-2: #c3e4d6;
 
-  --shadow-hard: 3px 3px 0 var(--color-ink);
-  --shadow-hard-lg: 6px 6px 0 var(--color-ink);
+  --color-mark: #ffc933;
+  --color-mark-hover: #ffd65f;
+  --color-on-mark: #2a1f00;
+
+  --color-ok: #17693a;
+  --color-ok-soft: #d8f0e0;
+  --color-warn: #7a4f00;
+  --color-warn-soft: #ffedc2;
+  --color-danger: #b3261e;
+  --color-danger-hover: #8f1c16;
+  --color-danger-soft: #fbe1de;
+  --color-on-danger: #ffffff;
+
+  --font-display: 'Anybody', 'Arial Narrow', system-ui, sans-serif;
+  --font-sans: 'Hanken Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
+
+  --shadow-pop: 0 12px 32px -12px rgb(10 30 22 / 0.28), 0 2px 6px rgb(10 30 22 / 0.08);
 }
 
 html.dark {
   color-scheme: dark;
-  --color-paper: #131311;
-  --color-paper-2: #1c1b18;
-  --color-card: #22211d;
-  --color-ink: #f3efe6;
-  --color-ink-2: #c5bfb2;
-  --color-ink-3: #8e887b;
-  --color-line: #36342e;
-  --color-accent: #f05a32;
-  --color-accent-dark: #ff7954;
-  --color-accent-soft: rgba(240, 90, 50, 0.16);
-  --color-ok: #3ea365;
-  --color-ok-soft: rgba(62, 163, 101, 0.16);
+  --color-ground: #0f1a16;
+  --color-surface: #17251f;
+  --color-sunken: #0a1310;
+  --color-ink: #e9f2ed;
+  --color-ink-2: #b6c7be;
+  --color-ink-3: #93a79c;
+  --color-line: #2b3d35;
+  --color-line-2: #647b70;
 
-  --color-ws-personal: #f05a32;
-  --color-ws-personal-soft: rgba(240, 90, 50, 0.16);
-  --color-ws-admin: #f59e0b;
-  --color-ws-admin-soft: rgba(245, 158, 11, 0.16);
-  --color-ws-owner: #a78bfa;
-  --color-ws-owner-soft: rgba(167, 139, 250, 0.16);
+  --color-brand: #4fca9f;
+  --color-brand-hover: #72d9b5;
+  --color-on-brand: #05241a;
+  --color-brand-soft: #163b2e;
+  --color-brand-ink: #86dfbd;
 
-  --shadow-hard: 3px 3px 0 #070706;
-  --shadow-hard-lg: 6px 6px 0 #070706;
+  --color-mat: #0b4636;
+  --color-mat-2: #083629;
+
+  --color-ok: #6fd699;
+  --color-ok-soft: #143a25;
+  --color-warn: #f5c55a;
+  --color-warn-soft: #3a2d0c;
+  --color-danger: #ff9a90;
+  --color-danger-hover: #ffb5ad;
+  --color-danger-soft: #47191a;
+  --color-on-danger: #2b0605;
+
+  --shadow-pop: 0 16px 40px -12px rgb(0 0 0 / 0.7), 0 2px 6px rgb(0 0 0 / 0.4);
+}
+
+/* Yönetim paneli: aynı roller, mavi mat. */
+html[data-space='admin'] {
+  --color-ground: #eef2f8;
+  --color-sunken: #e1e8f2;
+  --color-ink: #111c2e;
+  --color-ink-2: #404f67;
+  --color-ink-3: #5a6982;
+  --color-line: #ced8e6;
+  --color-line-2: #7d8da6;
+
+  --color-brand: #1f55ad;
+  --color-brand-hover: #184589;
+  --color-brand-soft: #d9e5f9;
+  --color-brand-ink: #184589;
+
+  --color-mat: #173f80;
+  --color-mat-2: #12336a;
+  --color-on-mat-2: #c6d8f5;
+}
+
+html.dark[data-space='admin'] {
+  --color-ground: #0e1624;
+  --color-surface: #162234;
+  --color-sunken: #0a101b;
+  --color-ink: #e8eef7;
+  --color-ink-2: #b5c2d6;
+  --color-ink-3: #909fb7;
+  --color-line: #2a3952;
+  --color-line-2: #617596;
+
+  --color-brand: #7fb2ff;
+  --color-brand-hover: #a2c8ff;
+  --color-on-brand: #05152f;
+  --color-brand-soft: #1a3157;
+  --color-brand-ink: #abcbff;
+
+  --color-mat: #123468;
+  --color-mat-2: #0d2850;
 }
 
 @layer base {
   html {
     scroll-behavior: smooth;
-    scroll-padding-top: 5rem;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-
-  html::-webkit-scrollbar,
-  body::-webkit-scrollbar {
-    width: 0;
-    height: 0;
-    display: none;
+    scrollbar-color: var(--color-line-2) transparent;
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
   }
 
   body {
-    @apply bg-paper font-sans text-ink antialiased;
-    overflow-x: hidden;
-    transition: background-color 150ms ease, color 150ms ease;
+    @apply bg-ground font-sans text-ink antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  button,
+  summary {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
   }
 
   input,
@@ -82,37 +155,187 @@ html.dark {
     color: var(--color-ink);
   }
 
-  html.dark select,
-  html.dark option {
-    background-color: var(--color-card);
+  select option {
+    background-color: var(--color-surface);
     color: var(--color-ink);
   }
 
-  h1,
-  h2,
-  h3,
-  h4 {
-    @apply font-display leading-[1.05] tracking-tight;
+  input[type='number'] {
+    appearance: textfield;
+  }
+
+  input::-webkit-outer-spin-button,
+  input::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+
+  input[type='search']::-webkit-search-cancel-button {
+    appearance: none;
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-accent);
+    outline: 2px solid var(--color-brand);
     outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--color-mark);
+    color: var(--color-on-mark);
+  }
+}
+
+/* Geniş ekranda landing kendi şerit metre gezginini kullandığı için kaydırma çubuğunu gizler. */
+@media (min-width: 64rem) {
+  html[data-scroll='ruler'] {
+    scrollbar-width: none;
+  }
+
+  html[data-scroll='ruler']::-webkit-scrollbar {
+    display: none;
   }
 }
 
 @utility container-x {
   width: 100%;
-  max-width: 70rem;
+  max-width: 74rem;
   margin-inline: auto;
-  padding-inline: 1.5rem;
+  padding-inline: clamp(1.25rem, 4vw, 2.5rem);
 }
 
-@utility eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-accent-dark);
+/* Başlık yazısı. Genişlik ekseni markanın kendisi: uzun olan geniş, kısa olan dar. */
+@utility display {
+  font-family: var(--font-display);
+  font-weight: 750;
+  line-height: 1.04;
+  letter-spacing: -0.005em;
+}
+
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mat üzerindeki odak çerçevesi marka rengiyle kaybolmasın. */
+@utility on-mat {
+  & :focus-visible {
+    outline-color: var(--color-mark);
+  }
+}
+
+/* Kesim matı dokusu: 12px ince, 60px kalın kareler. */
+@utility mat-grid {
+  background-color: var(--color-mat);
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.13) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.13) 1px, transparent 1px),
+    linear-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.05) 1px, transparent 1px);
+  background-size:
+    60px 60px,
+    60px 60px,
+    12px 12px,
+    12px 12px;
+}
+
+/* Ana eylem butonunun kesik köşesi. Zemin ::before'da, böylece odak çerçevesi kırpılmaz. */
+@utility cut-corner {
+  position: relative;
+  isolation: isolate;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: var(--cut-bg, var(--color-brand));
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 11px), calc(100% - 11px) 100%, 0 100%);
+    transition: background-color 120ms ease;
+  }
+}
+
+/* Kâğıt şerit: makasla kesilmiş sağ kenar. */
+@utility strip-cut {
+  clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
+}
+
+@utility skeleton {
+  border-radius: 3px;
+  background-color: var(--color-sunken);
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--color-surface) 70%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation: mit-sheen 1.4s linear infinite;
+}
+
+@keyframes mit-sheen {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+/* Açılır katmanlar */
+.pop-enter-active,
+.pop-leave-active {
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.pop-enter-from,
+.pop-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 140ms ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+
+/* Panel değiştirme: yeni matın yukarıdan inip aşağıdan çekilmesi */
+.space-enter-active {
+  transition: clip-path 260ms cubic-bezier(0.6, 0, 0.2, 1);
+}
+
+.space-leave-active {
+  transition: clip-path 260ms cubic-bezier(0.6, 0, 0.2, 1) 120ms;
+}
+
+.space-enter-from {
+  clip-path: inset(0 0 100% 0);
+}
+
+.space-enter-to,
+.space-leave-from {
+  clip-path: inset(0 0 0 0);
+}
+
+.space-leave-to {
+  clip-path: inset(100% 0 0 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

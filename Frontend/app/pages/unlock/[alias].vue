@@ -1,22 +1,26 @@
 <script setup lang="ts">
-// NOT (TODO): Şifreli linklerde şifre çözülmese bile ilk yönlendirme (/r/:alias) anında
-// tıklama sayısı artırılmakta ve cihaz logu tutulmaktadır. İleride şifre doğrulama
-// durumuna göre tıklama/log davranışı detaylı olarak ele alınacaktır.
-definePageMeta({ layout: 'marketing' })
+definePageMeta({ layout: 'visitor' })
 
 const route = useRoute()
 const { public: config } = useRuntimeConfig()
+const { display } = useShortUrl()
 const alias = computed(() => String(route.params.alias ?? ''))
 
-useHead({ title: () => `Şifreli Link (${alias.value}) — makeiTiny` })
+useHead({ title: () => `Parolalı link: ${alias.value} | makeiTiny` })
 
 const password = ref('')
-const errorMsg = ref('')
+const error = ref('')
 const loading = ref(false)
+const leaving = ref(false)
+
+watch(password, () => (error.value = ''))
 
 async function submit() {
-  if (!password.value) return
-  errorMsg.value = ''
+  if (!password.value) {
+    error.value = 'Parolayı yaz.'
+    return
+  }
+  error.value = ''
   loading.value = true
   try {
     const res = await $fetch<{ target: string }>(`${config.routerBase}/${alias.value}/unlock`, {
@@ -24,19 +28,18 @@ async function submit() {
       body: { password: password.value }
     })
     if (res?.target) {
+      leaving.value = true
       window.location.href = res.target
+      return
     }
+    error.value = 'Hedef adres alınamadı. Tekrar dene.'
   } catch (e: any) {
-    const code = e?.data?.code
-    if (code === 'link_not_found') {
-      await navigateTo(`/error/${alias.value}?reason=not_found`, { replace: true })
+    const reason = reasonFromCode(e?.data?.code)
+    if (reason) {
+      await navigateTo(`/error/${alias.value}?reason=${reason}`, { replace: true })
       return
     }
-    if (code === 'target_unreachable') {
-      await navigateTo(`/error/${alias.value}?reason=unreachable`, { replace: true })
-      return
-    }
-    errorMsg.value = e?.data?.message ?? 'Parola doğrulanamadı.'
+    error.value = e?.data?.message ?? 'Parola doğrulanamadı. Tekrar dene.'
   } finally {
     loading.value = false
   }
@@ -44,28 +47,18 @@ async function submit() {
 </script>
 
 <template>
-  <AuthCard
-    title="Bu link şifreli."
-    :subtitle="`/${alias} kısa bağlantısına devam etmek için parolayı girin.`"
-  >
-    <form class="flex flex-col gap-5" @submit.prevent="submit">
-      <p v-if="errorMsg" class="rounded-md border border-accent-dark bg-accent-soft px-3 py-2 text-sm text-accent-dark">
-        {{ errorMsg }}
-      </p>
-      <UiField
-        id="unlock-password"
-        v-model="password"
-        label="Link Parolası"
-        type="password"
-        placeholder="••••••••"
-        autocomplete="off"
-      />
-      <UiButton type="submit" block>
-        <UiIcon name="lock" :size="16" /> {{ loading ? 'Doğrulanıyor...' : 'Kilidi Aç ve Git' }}
-      </UiButton>
-    </form>
-    <template #footer>
-      <NuxtLink to="/" class="font-semibold text-accent-dark underline underline-offset-2">Ana sayfaya dön</NuxtLink>
-    </template>
-  </AuthCard>
+  <div class="mat-grid flex flex-1 items-center justify-center px-5 py-16">
+    <div class="w-full max-w-md bg-surface px-7 pb-7 pt-9 sm:px-10">
+      <UiIcon name="lock" :size="36" class="text-brand" />
+      <h1 class="display mt-5 text-[2.25rem]">Parola gerekiyor</h1>
+      <p class="mt-2 text-ink-2"><span class="break-all font-mono text-[15px]">{{ display(alias) }}</span> linki parolayla korunuyor.</p>
+
+      <form class="mt-7" novalidate @submit.prevent="submit">
+        <UiField id="unlock-password" v-model="password" label="Link parolası" type="password" autocomplete="off" large :error="error" :disabled="loading || leaving" />
+        <UiButton type="submit" block size="lg" class="mt-2" icon="unlock" :loading="loading || leaving" :loading-label="leaving ? 'Hedefe gidiliyor' : 'Denetleniyor'">
+          Kilidi aç
+        </UiButton>
+      </form>
+    </div>
+  </div>
 </template>

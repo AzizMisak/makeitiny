@@ -1,17 +1,29 @@
 <script setup lang="ts">
-withDefaults(defineProps<{ light?: boolean }>(), { light: false })
+withDefaults(defineProps<{ to?: string; tone?: 'ink' | 'mat' }>(), { to: '/', tone: 'ink' })
+
+// Kelime soldan sağa daralır: logo, ürünün yaptığı işi yapar.
+const letters = [
+  { c: 'm', w: 132 },
+  { c: 'a', w: 124 },
+  { c: 'k', w: 116 },
+  { c: 'e', w: 108 },
+  { c: 'i', w: 100 },
+  { c: 'T', w: 92 },
+  { c: 'i', w: 84 },
+  { c: 'n', w: 77 },
+  { c: 'y', w: 70 }
+]
 </script>
 
 <template>
-  <NuxtLink to="/" class="inline-flex items-center gap-2.5" aria-label="makeiTiny ana sayfa">
-    <svg width="30" height="30" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <rect x="1" y="1" width="30" height="30" rx="7" :fill="light ? '#f5f1e8' : '#1b1a17'" />
-      <path d="M6 11h20" :stroke="light ? '#1b1a17' : '#f5f1e8'" stroke-width="2.4" stroke-linecap="round" />
-      <path d="M6 16h13" :stroke="light ? '#1b1a17' : '#f5f1e8'" stroke-width="2.4" stroke-linecap="round" />
-      <path d="M6 21h5" stroke="#e5481f" stroke-width="2.4" stroke-linecap="round" />
-    </svg>
-    <span class="font-display text-[22px] font-extrabold tracking-tight" :class="light ? 'text-paper' : 'text-ink'">
-      make<span class="text-accent">i</span>Tiny
-    </span>
+  <NuxtLink :to="to" class="inline-flex items-baseline" aria-label="makeiTiny">
+    <span
+      v-for="(l, i) in letters"
+      :key="i"
+      aria-hidden="true"
+      class="font-display text-[23px] font-extrabold leading-none"
+      :class="tone === 'mat' ? (i === 4 ? 'text-mark' : 'text-on-mat') : i === 4 ? 'text-brand' : 'text-ink'"
+      :style="{ fontStretch: `${l.w}%` }"
+    >{{ l.c }}</span>
   </NuxtLink>
 </template>

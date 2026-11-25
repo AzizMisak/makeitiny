@@ -1,14 +1,17 @@
 <script setup lang="ts">
-definePageMeta({ layout: 'marketing' })
+definePageMeta({ layout: 'auth' })
+useHead({ title: 'Çıkış yapılıyor | makeiTiny' })
 
 const { logout } = useAuth()
 const { resetLinks } = useLinks()
 
-await logout()
-resetLinks()
-await navigateTo('/auth/login', { replace: true })
+onMounted(async () => {
+  await logout()
+  resetLinks()
+  await navigateTo('/auth/login', { replace: true })
+})
 </script>
 
 <template>
-  <div />
+  <p class="flex items-center gap-3 text-lg" role="status"><UiSpinner :size="20" /> Çıkış yapılıyor</p>
 </template>

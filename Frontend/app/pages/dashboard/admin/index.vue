@@ -1,123 +1,104 @@
 <script setup lang="ts">
 import type { AdminLinkItem, AdminStatsResponse } from '~/types/link'
 
-definePageMeta({ layout: 'dashboard', middleware: 'auth', roles: ['admin', 'owner'] })
-useHead({ title: 'Yönetim Özeti — makeiTiny' })
+definePageMeta({ layout: 'admin', middleware: 'auth', roles: ['admin', 'owner'] })
+useHead({ title: 'Özet | Yönetim | makeiTiny' })
 
-const { public: config } = useRuntimeConfig()
 const { fetchAdminStats, fetchAdminLinks } = useAdmin()
-const toast = useToast()
 
 const stats = ref<AdminStatsResponse | null>(null)
-const recentLinks = ref<AdminLinkItem[]>([])
+const recent = ref<AdminLinkItem[]>([])
 const loading = ref(true)
+const error = ref('')
 
-function displayShortUrl(alias: string): string {
-  return `${config.routerBase}/${alias}`.replace(/^https?:\/\//, '')
-}
-
-async function loadOverview() {
+async function load() {
   loading.value = true
+  error.value = ''
   try {
-    const [statsRes, linksRes] = await Promise.all([
-      fetchAdminStats(),
-      fetchAdminLinks(1, 8, '', 'all')
-    ])
-    stats.value = statsRes
-    recentLinks.value = linksRes.items
-  } catch (err: any) {
-    toast.error(err?.message ?? 'Yönetim verileri alınamadı.')
+    const [s, l] = await Promise.all([fetchAdminStats(), fetchAdminLinks(1, 10, '', 'all')])
+    stats.value = s
+    recent.value = l.items
+  } catch (e: any) {
+    error.value = e?.message ?? 'Yönetim verileri yüklenemedi.'
   } finally {
     loading.value = false
   }
 }
 
-onMounted(loadOverview)
+function share(part: number, whole: number): number {
+  return whole > 0 ? (part / whole) * 100 : 0
+}
+
+// Bütün / parça ilişkisi olan sayılar tek çubukta gösterilir.
+const ratios = computed(() => {
+  const s = stats.value
+  if (!s) return []
+  return [
+    {
+      key: 'users',
+      total: s.totalUsers,
+      label: 'kullanıcı',
+      a: { label: 'Aktif', value: s.activeUsers },
+      b: { label: 'Askıda', value: Math.max(0, s.totalUsers - s.activeUsers) },
+      to: '/dashboard/admin/users'
+    },
+    {
+      key: 'links',
+      total: s.totalLinks,
+      label: 'link',
+      a: { label: 'Açık', value: s.activeLinks },
+      b: { label: 'Kapalı', value: Math.max(0, s.totalLinks - s.activeLinks) },
+      to: '/dashboard/admin/links'
+    }
+  ]
+})
+
+onMounted(load)
 </script>
 
 <template>
-  <DashboardPageHeader
-    title="Yönetim özeti"
-    description="Platform genelindeki kullanıcı, link ve yönlendirme metrikleri."
-  >
-    <template #actions>
-      <UiButton variant="secondary" :disabled="loading" @click="loadOverview">
-        <UiIcon name="refresh" :size="15" /> Yenile
-      </UiButton>
-    </template>
-  </DashboardPageHeader>
+  <div>
+    <AdminHeader title="Özet" refreshable :loading="loading" @refresh="load" />
+    <UiLoadError v-if="error" :message="error" :loading="loading" class="mb-6" @retry="load" />
 
-  <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-    <DashboardStatTile
-      label="Toplam kullanıcı"
-      :value="loading ? '...' : (stats?.totalUsers ?? 0).toLocaleString('tr-TR')"
-    />
-    <DashboardStatTile
-      label="Aktif kullanıcı"
-      :value="loading ? '...' : (stats?.activeUsers ?? 0).toLocaleString('tr-TR')"
-    />
-    <DashboardStatTile
-      label="Toplam link"
-      :value="loading ? '...' : (stats?.totalLinks ?? 0).toLocaleString('tr-TR')"
-    />
-    <DashboardStatTile
-      label="Aktif link"
-      :value="loading ? '...' : (stats?.activeLinks ?? 0).toLocaleString('tr-TR')"
-    />
-    <DashboardStatTile
-      label="Engelli / Zararlı"
-      :value="loading ? '...' : (stats?.blockedLinks ?? 0).toLocaleString('tr-TR')"
-    />
-    <DashboardStatTile
-      label="Toplam tıklama"
-      :value="loading ? '...' : (stats?.totalClicks ?? 0).toLocaleString('tr-TR')"
-    />
-  </div>
-
-  <section class="mt-8 rounded-lg border-[1.5px] border-ink bg-card p-6 shadow-hard">
-    <div class="border-b border-line pb-4">
-      <h2 class="text-xl font-bold">Son oluşturulan linkler</h2>
-    </div>
-
-    <div v-if="loading" class="mt-4 flex flex-col gap-2.5">
-      <div v-for="i in 4" :key="i" class="h-14 animate-pulse rounded-md bg-paper-2" />
-    </div>
-
-    <p v-else-if="recentLinks.length === 0" class="py-8 text-center text-sm text-ink-3">
-      Henüz link yok.
-    </p>
-
-    <ul v-else class="mt-2 divide-y divide-line">
-      <li v-for="item in recentLinks" :key="item.id">
-        <NuxtLink
-          :to="`/dashboard/admin/links/${item.id}`"
-          class="group flex flex-wrap items-center justify-between gap-3 py-3.5 transition-colors hover:bg-paper/60"
-        >
-          <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="font-mono text-sm font-bold text-ink group-hover:text-accent group-hover:underline">
-                {{ displayShortUrl(item.alias) }}
-              </span>
-              <span v-if="item.title" class="truncate text-xs font-medium text-ink-2">• {{ item.title }}</span>
-              <UiBadge v-if="!item.isActive" tone="accent">Pasif</UiBadge>
-              <UiBadge :tone="securityStatusMeta(item.securityStatus).tone">
-                {{ securityStatusMeta(item.securityStatus).label }}
-              </UiBadge>
-            </div>
-            <p class="mt-0.5 truncate text-xs text-ink-3">{{ item.target }}</p>
-            <p class="mt-1 font-mono text-[11px] text-ink-3">
-              {{ item.userName || item.userEmail }} ({{ item.userEmail }})
-            </p>
-          </div>
-          <div class="flex shrink-0 items-center gap-4">
-            <div class="text-right">
-              <p class="font-display text-lg font-bold leading-none">{{ item.clicks.toLocaleString('tr-TR') }}</p>
-              <p class="mt-1 text-[11px] text-ink-3">{{ formatDateTr(item.createdAt) }}</p>
-            </div>
-            <span class="text-xs font-semibold text-ink-2 group-hover:text-ink">İncele →</span>
-          </div>
+    <section class="grid grid-cols-1 border border-line bg-surface md:grid-cols-[1fr_1fr_0.8fr_0.8fr] md:divide-x md:divide-line">
+      <template v-if="!stats">
+        <div v-for="i in 4" :key="i" class="p-6"><div class="skeleton h-10 w-28" /><div class="skeleton mt-4 h-4 w-40" /></div>
+      </template>
+      <template v-else>
+        <NuxtLink v-for="r in ratios" :key="r.key" :to="r.to" class="group block p-6 max-md:border-b max-md:border-line">
+          <p class="flex items-baseline gap-2">
+            <span class="display tnum text-4xl">{{ formatNumber(r.total) }}</span>
+            <span class="text-ink-2 group-hover:text-brand">{{ r.label }}</span>
+          </p>
+          <span class="mt-4 flex h-3 gap-0.5" aria-hidden="true">
+            <span class="bg-brand" :style="{ width: `${share(r.a.value, r.total)}%` }" />
+            <span class="flex-1 bg-line-2/50" />
+          </span>
+          <p class="tnum mt-2 flex justify-between text-sm text-ink-2">
+            <span>{{ r.a.label }} {{ formatNumber(r.a.value) }}</span>
+            <span>{{ r.b.label }} {{ formatNumber(r.b.value) }}</span>
+          </p>
         </NuxtLink>
-      </li>
-    </ul>
-  </section>
+        <div class="p-6 max-md:border-b max-md:border-line">
+          <p class="display tnum text-4xl">{{ formatNumber(stats.totalClicks) }}</p>
+          <p class="mt-1 text-ink-2">toplam tıklama</p>
+        </div>
+        <NuxtLink to="/dashboard/admin/links?durum=blocked" class="group block p-6">
+          <p class="display tnum text-4xl" :class="stats.blockedLinks > 0 ? 'text-danger' : ''">{{ formatNumber(stats.blockedLinks) }}</p>
+          <p class="mt-1 text-ink-2 group-hover:text-brand">engelli veya zararlı link</p>
+        </NuxtLink>
+      </template>
+    </section>
+
+    <section class="mt-10">
+      <div class="mb-4 flex items-baseline justify-between">
+        <h2 class="text-lg font-semibold">Son oluşturulan linkler</h2>
+        <NuxtLink to="/dashboard/admin/links" class="text-sm font-medium text-brand-ink underline-offset-4 hover:underline">Bütün linkler</NuxtLink>
+      </div>
+      <AdminTableSkeleton v-if="loading && recent.length === 0" label="Linkler yükleniyor" />
+      <UiEmpty v-else-if="recent.length === 0" title="Platformda henüz link yok" class="border border-line bg-surface" />
+      <AdminLinkTable v-else :links="recent" :loading="loading" caption="Son oluşturulan linkler" />
+    </section>
+  </div>
 </template>

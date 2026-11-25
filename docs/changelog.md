@@ -106,3 +106,12 @@ Bu doküman, MakeItTiny projesinde gerçekleştirilen altyapı, mimari ve geliş
 - **Frontend & Depo Yapılandırması:**
   - `.gitattributes` ile GitHub Linguist dil algılaması Go odaklı yapılandırıldı.
   - Frontend'de zero-FOUC gece modu, Kişisel / Yönetim / Owner görsel çalışma alanı ayrımı, otomatik 401 refresh & retry, link silme onay modalı, anonim kısaltma bölümü (kopyalama uyarılı), QR yönetimi ve admin ban/moderasyon ekranları tamamlandı.
+
+---
+
+## 10. Arayüzün Baştan Tasarlanması (Panel, Landing ve Ziyaretçi Sayfaları)
+- **Tasarım sistemi (ADR-013):** Kesim matı teması, yeni renk token'ları, yeni yazı tipleri ve `components/ui` bileşenleri (anahtar, seçim şeridi, sekme, pencere, menü, iskelet yükleme, sayfalama) hazırlandı. Checkbox'lar kaldırıldı.
+- **Kullanıcı paneli:** Her sayfa kendi düzenini aldı. Link detayı Analiz, Ziyaretler, QR kodu ve Ayarlar sekmelerine ayrıldı. Tek "Yeni link" ve tek tema düğmesi kaldı, yan menüdeki paket/kota kutusu kaldırıldı.
+- **Yönetim paneli:** Ayrı iskelete taşındı. "Hızlı moderasyon" yerine beş seçenekli inceleme kararı geldi. Owner rol sayfası tüm yönetim ekibini listeler.
+- **Landing:** Çalışan kısaltma tezgâhı, denenebilir ziyaretçi ekranları, tıklama kaydı gösterimi ve şerit metre gezgini eklendi.
+- **Doğruluk düzeltmeleri:** Grafikler en yeni 500 ziyaretten hesaplanıyor, parola değişince oturumların kapanacağı söyleniyor, parolalı linklerle ilgili eski tıklama notu ve ücretsiz pakette olmayan özelliklerin tanıtımı kaldırıldı.
