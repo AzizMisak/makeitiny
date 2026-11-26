@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AdminLinkItem } from '~/types/link'
+import type { AdminLinkItem, LinkLogItem } from '~/types/link'
 
 definePageMeta({ layout: 'admin', middleware: 'auth', roles: ['admin', 'owner'] })
 
@@ -16,13 +16,61 @@ const dirty = ref(false)
 useUnsavedGuard(() => dirty.value)
 useHead({ title: () => `${link.value?.alias ?? 'Link'} | Yönetim | makeiTiny` })
 
+const error = ref('')
+
+// Analiz, tek sayfadaki kayıtlardan değil en yeni 500 ziyaretten hesaplanır.
+const MAX_ANALYSIS_PAGES = 5
+const logs = ref<LinkLogItem[]>([])
+const logsTotal = ref(0)
+const logsLoading = ref(true)
+const logsError = ref('')
+
+async function loadAnalysis() {
+  logsLoading.value = true
+  logsError.value = ''
+  try {
+    const first = await fetchAdminLinkLogs(id.value, 1, 100)
+    const pages = Math.min(first.totalPages ?? 1, MAX_ANALYSIS_PAGES)
+    const rest = await Promise.all(Array.from({ length: pages - 1 }, (_, i) => fetchAdminLinkLogs(id.value, i + 2, 100)))
+    logs.value = [first, ...rest].flatMap((r) => r.items ?? [])
+    logsTotal.value = first.total ?? logs.value.length
+  } catch (e: any) {
+    logsError.value = e?.message ?? 'Analiz verisi yüklenemedi.'
+  } finally {
+    logsLoading.value = false
+  }
+}
+
+async function refreshVisitData() {
+  try {
+    const fresh = await fetchAdminLinkById(id.value)
+    if (fresh) link.value = fresh
+  } catch {
+    // Sessiz geçilir; analiz kendi hatasını gösterir.
+  }
+  loadAnalysis()
+}
+
 async function load() {
   loading.value = true
-  link.value = await fetchAdminLinkById(id.value)
-  loading.value = false
+  error.value = ''
+  try {
+    link.value = await fetchAdminLinkById(id.value)
+    if (link.value) loadAnalysis()
+  } catch (e: any) {
+    error.value = e?.message ?? 'Link bilgileri yüklenemedi.'
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(load)
+
+watch(tab, (next, prev) => {
+  if (next === 'ziyaretler' && prev && link.value) {
+    refreshVisitData()
+  }
+})
 
 const parts = computed(() => splitUrl(link.value?.target ?? ''))
 
@@ -54,6 +102,8 @@ const tabs = computed(() => [
       <div><div class="skeleton h-8 w-72" /><div class="skeleton mt-5 h-28" /><div class="skeleton mt-8 h-72" /></div>
       <div class="skeleton h-[30rem]" />
     </div>
+
+    <UiLoadError v-else-if="error" :message="error" @retry="load" />
 
     <UiEmpty v-else-if="!link" icon="search" title="Link bulunamadı" text="Silinmiş olabilir ya da adres yanlış." class="border border-line bg-surface">
       <UiButton variant="outline" icon="refresh" @click="load">Tekrar dene</UiButton>
@@ -99,7 +149,21 @@ const tabs = computed(() => [
 
         <UiTabs v-model="tab" :tabs="tabs" label="Link bölümleri" class="mt-8" />
         <div :id="`panel-${tab}`" role="tabpanel" :aria-labelledby="`tab-${tab}`" class="pt-6">
-          <LinksVisits v-show="tab === 'ziyaretler'" :fetch-page="(p: number, l: number) => fetchAdminLinkLogs(id, p, l)" />
+          <div v-show="tab === 'ziyaretler'">
+            <LinksVisits :fetch-page="(p: number, l: number) => fetchAdminLinkLogs(id, p, l)" @refreshed="refreshVisitData" />
+
+            <section class="mt-10 border-t border-line pt-8" aria-labelledby="admin-analysis-title">
+              <h2 id="admin-analysis-title" class="mb-4 text-lg font-semibold">Analiz</h2>
+              <LinksAnalysis
+                :logs="logs"
+                :total="logsTotal"
+                :loading="logsLoading"
+                :error="logsError"
+                window-label="Tüm geçmiş"
+                @retry="loadAnalysis"
+              />
+            </section>
+          </div>
           <AdminLinkEditor
             v-show="tab === 'duzenle'"
             v-model="link"

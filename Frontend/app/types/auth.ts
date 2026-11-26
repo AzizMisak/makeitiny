@@ -50,5 +50,6 @@ export interface RegisterPayload {
 /** POST /auth/resetpass gövdesi. */
 export interface ResetPasswordPayload {
   email: string
+  currentPassword?: string
   newPassword: string
 }

@@ -5,7 +5,7 @@ export function useShortUrl() {
 
   return {
     prefix,
-    full: (alias: string) => `${config.routerBase}/${alias}`,
+    full: (alias: string) => `${config.routerBase}/${encodeURIComponent(alias)}`,
     display: (alias: string) => `${prefix}${alias}`
   }
 }

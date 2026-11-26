@@ -80,6 +80,7 @@ export function useAuth() {
     } catch {
       token.value = null
       user.value = null
+      clearNuxtState(['mit_space_last'])
       return false
     }
   }
@@ -88,6 +89,7 @@ export function useAuth() {
     const res = await useApi().post<AuthResponse, LoginPayload>('/auth/login', payload)
     token.value = res.token
     user.value = res.user
+    clearNuxtState(['mit_space_last'])
     return res.user
   }
 
@@ -95,7 +97,27 @@ export function useAuth() {
     const res = await useApi().post<AuthResponse, RegisterPayload>('/auth/register', payload)
     token.value = res.token
     user.value = res.user
+    clearNuxtState(['mit_space_last'])
     return res.user
+  }
+
+  /** Görünen adı değiştirir; sunucu boşlukları kırpar, 2–40 karakter ister. */
+  async function updateName(name: string) {
+    const fresh = await useApi().patch<User, { name: string }>('/auth/user', { name })
+    user.value = fresh
+    return fresh
+  }
+
+  /** Standart kullanıcının paketini değiştirir; sınırı aşan en eski linkler 2 ay askıya alınır. */
+  async function changePlan(planId: number) {
+    const fresh = await useApi().put<User, { planId: number }>('/auth/user/plan', { planId })
+    user.value = fresh
+    return fresh
+  }
+
+  /** Verilen kullanıcı kimliği oturumdaki kişiye mi ait? */
+  function isSelf(id?: string): boolean {
+    return !!id && id === user.value?.id
   }
 
   async function logout() {
@@ -104,6 +126,8 @@ export function useAuth() {
     }
     token.value = null
     user.value = null
+    // Aynı sekmede başka bir hesapla girilirse önceki hesabın panel sayfaları hatırlanmasın.
+    clearNuxtState(['mit_space_last'])
   }
 
   async function resetPassword(payload: ResetPasswordPayload) {
@@ -114,6 +138,7 @@ export function useAuth() {
     await useApi().del('/auth/user')
     token.value = null
     user.value = null
+    clearNuxtState(['mit_space_last'])
   }
 
   return {
@@ -134,6 +159,9 @@ export function useAuth() {
     register,
     logout,
     resetPassword,
+    updateName,
+    changePlan,
+    isSelf,
     deleteAccount
   }
 }

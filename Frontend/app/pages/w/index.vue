@@ -6,7 +6,14 @@ const route = useRoute()
 const alias = computed(() => String(route.query.alias ?? route.query.link ?? ''))
 
 onMounted(async () => {
-  if (alias.value) await navigateTo(`/w/${alias.value}`, { replace: true })
+  if (!alias.value) return
+  await navigateTo(
+    {
+      path: `/w/${encodeURIComponent(alias.value)}`,
+      query: route.query.t ? { t: String(route.query.t) } : undefined
+    },
+    { replace: true }
+  )
 })
 </script>
 

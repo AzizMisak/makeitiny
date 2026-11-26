@@ -19,6 +19,8 @@ export interface LinkItem {
   hasQr: boolean
   qrUrl: string
   isAnonymous: boolean
+  /** Doluysa paket düşürüldüğü için askıda; bu tarihte kalıcı olarak silinir. */
+  planGraceUntil?: string
   createdAt: string
 }
 
@@ -106,13 +108,12 @@ export interface AliasCheckResult {
   available: boolean
 }
 
-/** Router: GET /:link/preview yanıtı. */
-export interface LinkPreview {
+/** Router: GET /:link/wait?t= yanıtı. Hedef adresi içermez. */
+export interface WaitInfo {
   alias: string
-  target: string
-  locked: boolean
-  waitEnabled: boolean
   waitSeconds: number
+  remainingSeconds: number
+  adEnabled: boolean
 }
 
 /** Admin / Owner API tipleri */

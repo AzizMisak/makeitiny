@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,14 @@ func New(authSvc *service.AuthService, linkSvc *service.LinkService) *Handler {
 	}
 }
 
+func (h *Handler) isHTTPS(r *http.Request) bool {
+	base := ""
+	if h.links != nil {
+		base = h.links.PublicBaseURL()
+	}
+	return auth.IsHTTPS(r, base)
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -45,20 +54,35 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
+func isTrustedProxyIP(addr netip.Addr) bool {
+	addr = addr.WithZone("").Unmap()
+	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast()
+}
+
 func extractClientIP(r *http.Request) string {
+	peerIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		peerIP = host
+	}
+	peerAddr, err := netip.ParseAddr(strings.Trim(peerIP, "[]"))
+	if err != nil || !isTrustedProxyIP(peerAddr) {
+		return peerIP
+	}
+
 	if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
-		return ip
+		if parsed, err := netip.ParseAddr(strings.Trim(ip, "[]")); err == nil {
+			return parsed.WithZone("").Unmap().String()
+		}
 	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
 		if p := strings.TrimSpace(parts[0]); p != "" {
-			return p
+			if parsed, err := netip.ParseAddr(strings.Trim(p, "[]")); err == nil {
+				return parsed.WithZone("").Unmap().String()
+			}
 		}
 	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
+	return peerAddr.WithZone("").Unmap().String()
 }
 
 // authorize gelen isteğin JWT token'ını doğrular, kullanıcının aktifliğini ve (varsa) gereken rolleri kontrol eder.
@@ -106,7 +130,7 @@ func toUserModel(p service.UserProfile) gen.User {
 		createdAt = p.User.CreatedAt.Time.Format("2006-01-02")
 	}
 	var planExpiresAt *string
-	if p.User.PlanExpiresAt.Valid {
+	if p.User.PlanExpiresAt.Valid && time.Now().Before(p.User.PlanExpiresAt.Time) {
 		s := p.User.PlanExpiresAt.Time.Format("2006-01-02")
 		planExpiresAt = &s
 	}
@@ -157,6 +181,11 @@ func toLinkItem(l db.Link) gen.LinkItem {
 	if secStatus == "" {
 		secStatus = "unchecked"
 	}
+	var planGraceUntil *string
+	if l.PlanGraceUntil.Valid {
+		s := l.PlanGraceUntil.Time.Format("2006-01-02")
+		planGraceUntil = &s
+	}
 	hasQr := l.QrCodePath != ""
 	qrUrl := ""
 	if hasQr {
@@ -179,6 +208,7 @@ func toLinkItem(l db.Link) gen.LinkItem {
 		HasQr:          hasQr,
 		QrUrl:          qrUrl,
 		IsAnonymous:    l.IsAnonymous,
+		PlanGraceUntil: planGraceUntil,
 		CreatedAt:      createdAt,
 	}
 }
@@ -298,9 +328,9 @@ func toAdminLinkDetailItem(row db.GetAdminLinkByPublicIDRow) gen.AdminLinkItem {
 }
 
 func toLinkLogItem(lg db.Log, linkPublicID string) gen.LinkLogItem {
-	clickedAt := ""
+	var clickedAt time.Time
 	if lg.ClickedAt.Valid {
-		clickedAt = lg.ClickedAt.Time.Local().Format("2006-01-02 15:04:05")
+		clickedAt = lg.ClickedAt.Time.UTC()
 	}
 	return gen.LinkLogItem{
 		Id:             strconv.FormatInt(lg.ID, 10),
@@ -340,10 +370,19 @@ func (h *Handler) ListPlans(w http.ResponseWriter, r *http.Request) {
 
 // Auth
 
+// writeDecodeError gövde çözümlenemediğinde hatayı yazar. E-posta biçimi hatalıysa bunu açıkça söyler.
+func writeDecodeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, openapi_types.ErrValidationEmail) {
+		writeError(w, http.StatusBadRequest, "invalid_email", service.ErrInvalidEmail.Error())
+		return
+	}
+	writeError(w, http.StatusBadRequest, "invalid_json", "Geçersiz JSON gövdesi.")
+}
+
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var req gen.RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json", "Geçersiz JSON gövdesi.")
+		writeDecodeError(w, err)
 		return
 	}
 
@@ -352,6 +391,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, service.ErrInvalidEmail):
 			writeError(w, http.StatusBadRequest, "invalid_email", err.Error())
+		case errors.Is(err, service.ErrInvalidName):
+			writeError(w, http.StatusBadRequest, "invalid_name", err.Error())
 		case errors.Is(err, service.ErrPasswordTooShort):
 			writeError(w, http.StatusBadRequest, "password_too_short", err.Error())
 		case errors.Is(err, service.ErrInvalidInput):
@@ -364,7 +405,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auth.SetRefreshCookie(w, refreshToken, int(auth.RefreshTokenTTL.Seconds()))
+	auth.SetRefreshCookie(w, refreshToken, int(auth.RefreshTokenTTL.Seconds()), h.isHTTPS(r))
 	writeJSON(w, http.StatusCreated, gen.AuthResponse{
 		Token: token,
 		User:  toUserModel(profile),
@@ -374,7 +415,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var req gen.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json", "Geçersiz JSON gövdesi.")
+		writeDecodeError(w, err)
 		return
 	}
 
@@ -393,7 +434,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auth.SetRefreshCookie(w, refreshToken, int(auth.RefreshTokenTTL.Seconds()))
+	auth.SetRefreshCookie(w, refreshToken, int(auth.RefreshTokenTTL.Seconds()), h.isHTTPS(r))
 	writeJSON(w, http.StatusOK, gen.AuthResponse{
 		Token: token,
 		User:  toUserModel(profile),
@@ -413,7 +454,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	token, newRefresh, profile, err := h.auth.RefreshSession(r.Context(), rawRefresh, r.UserAgent(), extractClientIP(r))
 	if err != nil {
-		auth.ClearRefreshCookie(w)
+		auth.ClearRefreshCookie(w, h.isHTTPS(r))
 		if errors.Is(err, service.ErrUserSuspended) {
 			writeError(w, http.StatusForbidden, "account_suspended", err.Error())
 			return
@@ -422,7 +463,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auth.SetRefreshCookie(w, newRefresh, int(auth.RefreshTokenTTL.Seconds()))
+	auth.SetRefreshCookie(w, newRefresh, int(auth.RefreshTokenTTL.Seconds()), h.isHTTPS(r))
 	writeJSON(w, http.StatusOK, gen.AuthResponse{
 		Token: token,
 		User:  toUserModel(profile),
@@ -433,7 +474,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	tokenStr, _ := auth.ExtractToken(r)
 	rawRefresh := auth.ExtractRefreshCookie(r)
 	h.auth.Logout(r.Context(), tokenStr, rawRefresh)
-	auth.ClearRefreshCookie(w)
+	auth.ClearRefreshCookie(w, h.isHTTPS(r))
 
 	writeJSON(w, http.StatusOK, gen.MessageResponse{
 		Message: "Oturum başarıyla sonlandırıldı.",
@@ -448,14 +489,28 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 
 	var req gen.ResetPasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json", "Geçersiz JSON gövdesi.")
+		writeDecodeError(w, err)
 		return
 	}
 
-	if err := h.auth.ResetPassword(r.Context(), actor, string(req.Email), req.NewPassword); err != nil {
+	curPw := ""
+	if req.CurrentPassword != nil {
+		curPw = *req.CurrentPassword
+	}
+
+	targetEmail := strings.TrimSpace(string(req.Email))
+	isSelf := strings.EqualFold(targetEmail, actor.User.Email)
+
+	if err := h.auth.ResetPassword(r.Context(), actor, string(req.Email), curPw, req.NewPassword); err != nil {
 		switch {
 		case errors.Is(err, service.ErrForbidden):
-			writeError(w, http.StatusForbidden, "forbidden", "Yalnızca kendi şifrenizi değiştirebilirsiniz.")
+			msg := "Bu kullanıcının parolasını değiştirme yetkiniz bulunmuyor."
+			if !service.IsPrivileged(actor.Roles) && !isSelf {
+				msg = "Yalnızca kendi şifrenizi değiştirebilirsiniz."
+			}
+			writeError(w, http.StatusForbidden, "forbidden", msg)
+		case errors.Is(err, service.ErrInvalidCurrentPassword):
+			writeError(w, http.StatusBadRequest, "invalid_current_password", err.Error())
 		case errors.Is(err, service.ErrPasswordTooShort):
 			writeError(w, http.StatusBadRequest, "password_too_short", err.Error())
 		case errors.Is(err, service.ErrInvalidEmail):
@@ -470,8 +525,12 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	msg := "Kullanıcının parolası başarıyla güncellendi."
+	if isSelf {
+		msg = "Parolanız başarıyla güncellendi."
+	}
 	writeJSON(w, http.StatusOK, gen.MessageResponse{
-		Message: "Parolanız başarıyla güncellendi.",
+		Message: msg,
 	})
 }
 
@@ -482,6 +541,62 @@ func (h *Handler) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, toUserModel(profile))
+}
+
+func (h *Handler) UpdateCurrentUser(w http.ResponseWriter, r *http.Request) {
+	profile, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+
+	var req gen.UpdateCurrentUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "Geçersiz JSON gövdesi.")
+		return
+	}
+
+	updated, err := h.auth.UpdateName(r.Context(), profile, req.Name)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidName):
+			writeError(w, http.StatusBadRequest, "invalid_name", err.Error())
+		case errors.Is(err, service.ErrUserNotFound):
+			writeError(w, http.StatusUnauthorized, "user_not_found", "Kullanıcı bulunamadı.")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Ad güncellenemedi.")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toUserModel(updated))
+}
+
+func (h *Handler) ChangeCurrentUserPlan(w http.ResponseWriter, r *http.Request) {
+	profile, ok := h.authorize(w, r)
+	if !ok {
+		return
+	}
+
+	var req gen.ChangePlanRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "Geçersiz JSON gövdesi.")
+		return
+	}
+
+	updated, err := h.auth.ChangeOwnPlan(r.Context(), profile, req.PlanId)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrPlanNotFound):
+			writeError(w, http.StatusBadRequest, "plan_not_found", err.Error())
+		case errors.Is(err, service.ErrPlanNotApplicable):
+			writeError(w, http.StatusBadRequest, "plan_not_applicable", err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Paket değiştirilemedi.")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toUserModel(updated))
 }
 
 func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
@@ -502,7 +617,7 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auth.ClearRefreshCookie(w)
+	auth.ClearRefreshCookie(w, h.isHTTPS(r))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -528,6 +643,8 @@ func (h *Handler) CreateAnonymousLink(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrAnonRateLimited):
 			writeError(w, http.StatusTooManyRequests, "anon_rate_limited", err.Error())
 		case errors.Is(err, service.ErrInvalidTargetURL),
+			errors.Is(err, service.ErrInternalTargetURL),
+			errors.Is(err, service.ErrBlankPassword),
 			errors.Is(err, service.ErrInvalidWaitSeconds),
 			errors.Is(err, service.ErrInvalidInput):
 			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -593,6 +710,8 @@ func (h *Handler) CreateLink(w http.ResponseWriter, r *http.Request) {
 			errors.Is(err, service.ErrPlanAdsRestricted):
 			writeError(w, http.StatusForbidden, "plan_feature_restricted", err.Error())
 		case errors.Is(err, service.ErrInvalidTargetURL),
+			errors.Is(err, service.ErrInternalTargetURL),
+			errors.Is(err, service.ErrBlankPassword),
 			errors.Is(err, service.ErrInvalidAlias),
 			errors.Is(err, service.ErrInvalidWaitSeconds),
 			errors.Is(err, service.ErrInvalidInput):
@@ -648,6 +767,9 @@ func (h *Handler) CheckAlias(w http.ResponseWriter, r *http.Request, alias strin
 	}
 
 	available, err := h.links.CheckAlias(r.Context(), alias)
+	if errors.Is(err, service.ErrAliasTaken) {
+		available, err = false, nil
+	}
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidAlias) {
 			writeError(w, http.StatusBadRequest, "invalid_alias", err.Error())
@@ -710,11 +832,15 @@ func (h *Handler) UpdateLink(w http.ResponseWriter, r *http.Request, id string) 
 		switch {
 		case errors.Is(err, service.ErrLinkNotFound):
 			writeError(w, http.StatusNotFound, "link_not_found", err.Error())
+		case errors.Is(err, service.ErrForbidden):
+			writeError(w, http.StatusForbidden, "forbidden", err.Error())
 		case errors.Is(err, service.ErrPlanCustomAliasRestricted),
 			errors.Is(err, service.ErrPlanPasswordRestricted),
 			errors.Is(err, service.ErrPlanAdsRestricted):
 			writeError(w, http.StatusForbidden, "plan_feature_restricted", err.Error())
 		case errors.Is(err, service.ErrInvalidTargetURL),
+			errors.Is(err, service.ErrInternalTargetURL),
+			errors.Is(err, service.ErrBlankPassword),
 			errors.Is(err, service.ErrInvalidAlias),
 			errors.Is(err, service.ErrInvalidWaitSeconds),
 			errors.Is(err, service.ErrInvalidInput):
@@ -869,6 +995,10 @@ func (h *Handler) AdminListLinks(w http.ResponseWriter, r *http.Request, params 
 
 	result, err := h.links.AdminListLinks(r.Context(), params.Page, params.Limit, params.Search, statusStr)
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Linkler listelenemedi.")
 		return
 	}
@@ -939,7 +1069,11 @@ func (h *Handler) AdminUpdateLink(w http.ResponseWriter, r *http.Request, id str
 		switch {
 		case errors.Is(err, service.ErrLinkNotFound):
 			writeError(w, http.StatusNotFound, "link_not_found", err.Error())
+		case errors.Is(err, service.ErrForbidden):
+			writeError(w, http.StatusForbidden, "forbidden", "Engellenmiş veya zararlı bir link yayına alınamaz.")
 		case errors.Is(err, service.ErrInvalidTargetURL),
+			errors.Is(err, service.ErrInternalTargetURL),
+			errors.Is(err, service.ErrBlankPassword),
 			errors.Is(err, service.ErrInvalidAlias),
 			errors.Is(err, service.ErrInvalidWaitSeconds),
 			errors.Is(err, service.ErrInvalidInput):
@@ -1063,6 +1197,8 @@ func (h *Handler) AdminUpdateUser(w http.ResponseWriter, r *http.Request, id str
 			writeError(w, http.StatusNotFound, "user_not_found", err.Error())
 		case errors.Is(err, service.ErrPlanNotFound):
 			writeError(w, http.StatusBadRequest, "plan_not_found", err.Error())
+		case errors.Is(err, service.ErrPlanNotApplicable):
+			writeError(w, http.StatusBadRequest, "plan_not_applicable", err.Error())
 		case errors.Is(err, service.ErrForbidden):
 			writeError(w, http.StatusForbidden, "forbidden", err.Error())
 		case errors.Is(err, service.ErrInvalidInput):
@@ -1132,6 +1268,8 @@ func (h *Handler) AdminUpdatePlan(w http.ResponseWriter, r *http.Request, id int
 		switch {
 		case errors.Is(err, service.ErrPlanNotFound):
 			writeError(w, http.StatusNotFound, "plan_not_found", err.Error())
+		case errors.Is(err, service.ErrInvalidPlanValues):
+			writeError(w, http.StatusBadRequest, "invalid_plan_values", err.Error())
 		case errors.Is(err, service.ErrForbidden):
 			writeError(w, http.StatusForbidden, "forbidden", err.Error())
 		default:

@@ -30,6 +30,7 @@ type Link struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 	IsAnonymous       bool               `json:"is_anonymous"`
 	CreatedByIp       string             `json:"created_by_ip"`
+	PlanGraceUntil    pgtype.Timestamptz `json:"plan_grace_until"`
 }
 
 type Log struct {

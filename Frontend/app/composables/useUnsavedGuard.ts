@@ -2,10 +2,11 @@ import { onBeforeRouteLeave } from 'vue-router'
 
 /** Kaydedilmemiş değişiklik varken sayfadan çıkışı sorar. */
 export function useUnsavedGuard(dirty: () => boolean) {
+  const { isLoggedIn } = useAuth()
   const { ask } = useConfirm()
 
-  onBeforeRouteLeave(async () => {
-    if (!dirty()) return true
+  onBeforeRouteLeave(async (to) => {
+    if (!isLoggedIn.value || to.path.startsWith('/auth/') || !dirty()) return true
     return await ask({
       title: 'Değişiklikler kaydedilmedi',
       message: 'Bu sayfadan çıkarsan yaptığın değişiklikler kaybolur.',

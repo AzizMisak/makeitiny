@@ -12,10 +12,10 @@ import type {
 export function normalizeTargetUrl(raw: string): string {
   const trimmed = raw.trim()
   if (!trimmed) return ''
-  if (!/^https?:\/\//i.test(trimmed)) {
-    return `https://${trimmed}`
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
+    return trimmed
   }
-  return trimmed
+  return `https://${trimmed}`
 }
 
 export function useLinks() {
@@ -68,7 +68,7 @@ export function useLinks() {
   async function addLink(input: CreateLinkPayload) {
     const payload: CreateLinkPayload = {
       ...input,
-      target: normalizeTargetUrl(input.target)
+      target: input.target.trim()
     }
     const created = await useApi().post<LinkItem, CreateLinkPayload>('/links', payload)
     await Promise.all([
@@ -81,7 +81,7 @@ export function useLinks() {
   async function createAnonymousLink(input: CreateAnonymousLinkPayload): Promise<AnonymousLinkResponse> {
     const payload: CreateAnonymousLinkPayload = {
       ...input,
-      target: normalizeTargetUrl(input.target)
+      target: input.target.trim()
     }
     return await useApi().post<AnonymousLinkResponse, CreateAnonymousLinkPayload>('/links/anonymous', payload)
   }
@@ -89,7 +89,7 @@ export function useLinks() {
   async function updateLink(id: string, input: UpdateLinkPayload) {
     const payload: UpdateLinkPayload = {
       ...input,
-      target: input.target !== undefined ? normalizeTargetUrl(input.target) : undefined
+      target: input.target !== undefined ? input.target.trim() : undefined
     }
     const updated = await useApi().patch<LinkItem, UpdateLinkPayload>(`/links/${id}`, payload)
     links.value = links.value.map((l) => (l.id === id ? updated : l))

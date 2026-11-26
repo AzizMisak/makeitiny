@@ -8,6 +8,8 @@ const PAGE_SIZE = 20
 const route = useRoute()
 const router = useRouter()
 const { fetchAdminUsers } = useAdmin()
+const { isSelf } = useAuth()
+const { busy: exporting, exportAdminUsers } = useExport()
 
 const users = ref<User[]>([])
 const page = ref(1)
@@ -17,6 +19,7 @@ const loading = ref(true)
 const loadedOnce = ref(false)
 const error = ref('')
 const search = ref(String(route.query.ara ?? ''))
+const searchKey = ref(0)
 
 async function load(next = page.value) {
   loading.value = true
@@ -41,14 +44,43 @@ function onSearch(value: string) {
   load(1)
 }
 
+watch(
+  () => route.query.ara,
+  (q) => {
+    const next = String(q ?? '')
+    if (next === search.value) return
+    search.value = next
+    searchKey.value++
+    load(1)
+  }
+)
+
 onMounted(() => load(1))
+
+const exportMenu = computed(() => [
+  { label: 'CSV olarak indir', icon: 'download', disabled: !!exporting.value, onSelect: () => exportAdminUsers('csv', search.value) },
+  { label: 'JSON olarak indir', icon: 'download', disabled: !!exporting.value, onSelect: () => exportAdminUsers('json', search.value) }
+])
 </script>
 
 <template>
   <div>
     <AdminHeader title="Kullanıcılar" :note="loadedOnce ? `${formatNumber(total)} kayıt` : ''" refreshable :loading="loading" @refresh="load()">
+      <UiMenu v-if="total > 0" label="Kullanıcıları dışa aktar" :items="exportMenu">
+        <template #trigger="{ toggle, open }">
+          <UiIconButton
+            icon="download"
+            label="Kullanıcıları dışa aktar"
+            :loading="exporting.startsWith('admin-users-')"
+            :aria-expanded="open"
+            aria-haspopup="menu"
+            @click="toggle"
+          />
+        </template>
+      </UiMenu>
       <UiSearchBox
         id="admin-user-search"
+        :key="searchKey"
         class="sm:w-96"
         placeholder="Ad, e-posta veya kimlik"
         :active="search"
@@ -76,16 +108,17 @@ onMounted(() => load(1))
             </tr>
           </thead>
           <tbody class="divide-y divide-line">
-            <tr v-for="u in users" :key="u.id" class="relative hover:bg-brand-soft/40">
+            <tr v-for="u in users" :key="u.id" class="relative hover:bg-brand-soft/40" :class="isSelf(u.id) ? 'bg-mark/10' : ''">
               <td class="max-w-sm px-4 py-3">
                 <div class="flex items-center gap-3">
                   <AdminAvatar :name="u.name" :email="u.email" />
-                  <div class="min-w-0">
+                  <div class="flex min-w-0 flex-wrap items-center gap-x-2">
                     <NuxtLink
                       :to="`/dashboard/admin/users/${u.id}`"
                       class="block truncate font-semibold after:absolute after:inset-0 after:content-[''] hover:text-brand"
                     >{{ u.name || 'İsimsiz' }}</NuxtLink>
-                    <p class="truncate text-ink-3">{{ u.email }}</p>
+                    <UiTag v-if="isSelf(u.id)" tone="mark" class="relative z-10 ml-0.5 mt-0.5">Sen</UiTag>
+                    <p class="w-full truncate text-ink-3">{{ u.email }}</p>
                   </div>
                 </div>
               </td>
@@ -98,8 +131,11 @@ onMounted(() => load(1))
                 <p v-if="!u.isActive && u.banReason" class="truncate text-ink-3" :title="u.banReason">{{ u.banReason }}</p>
               </td>
               <td class="px-4 py-3">
-                {{ u.plan.name }}
-                <p v-if="u.planExpiresAt" class="tnum text-ink-3">{{ formatDateTr(u.planExpiresAt) }} biter</p>
+                <span v-if="isPrivileged(u.roles)" class="text-ink-3">Pakete tabi değil</span>
+                <template v-else>
+                  {{ u.plan.name }}
+                  <p v-if="u.planExpiresAt" class="tnum text-ink-3">{{ formatDateTr(u.planExpiresAt) }} biter</p>
+                </template>
               </td>
               <td class="tnum px-4 py-3 text-right font-semibold">{{ formatNumber(u.linkCount) }}</td>
               <td class="tnum whitespace-nowrap px-4 py-3 text-ink-2">{{ formatDateTr(u.createdAt) }}</td>

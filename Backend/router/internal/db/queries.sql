@@ -11,7 +11,7 @@ SELECT
     l.wait_enabled,
     l.wait_seconds,
     l.title,
-    (l.is_active AND COALESCE(u.is_active, TRUE)) AS is_active,
+    (l.is_active AND COALESCE(u.is_active OR (u.banned_until IS NOT NULL AND u.banned_until <= NOW()), TRUE)) AS is_active,
     l.expires_at,
     l.max_clicks,
     l.ad_enabled,
@@ -25,10 +25,11 @@ LEFT JOIN users u ON u.id = l.user_id
 WHERE l.alias = $1
 LIMIT 1;
 
--- name: IncrementLinkClicks :exec
+-- name: IncrementLinkClicks :execrows
 UPDATE links
 SET clicks = clicks + 1
-WHERE alias = $1;
+WHERE alias = $1
+  AND (max_clicks IS NULL OR max_clicks <= 0 OR clicks + $2 < max_clicks);
 
 -- name: CreateLog :one
 INSERT INTO logs (

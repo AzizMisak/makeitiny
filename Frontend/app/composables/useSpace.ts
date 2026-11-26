@@ -22,6 +22,17 @@ export function useSpace() {
     lastPath.value = { ...lastPath.value, [current.value]: route.fullPath }
   }
 
+  /** Hatırlanan sayfa artık yetkisi olmayan bir yerse (ör. sahip sayfası) panelin ana sayfasına döner. */
+  function targetFor(space: Space): string {
+    const remembered = lastPath.value[space]
+    if (space === 'admin') {
+      const { isOwner, isAdmin } = useAuth()
+      if (!isAdmin.value) return '/dashboard'
+      if (remembered.startsWith('/dashboard/owner') && !isOwner.value) return '/dashboard/admin'
+    }
+    return remembered
+  }
+
   async function switchTo(space: Space) {
     if (switchingTo.value) return
     // Perde, kaydedilmemiş değişiklik sorusu geçildikten sonra iner.
@@ -30,7 +41,7 @@ export function useSpace() {
       await new Promise((r) => setTimeout(r, 280))
     })
     try {
-      await navigateTo(lastPath.value[space])
+      await navigateTo(targetFor(space))
     } finally {
       stop()
       switchingTo.value = null

@@ -7,13 +7,21 @@ interface RequestOptions<TBody> {
   body?: TBody
   query?: Record<string, string | number | boolean | undefined>
   skipAuthRefresh?: boolean
+  responseType?: 'json' | 'blob'
 }
 
 let refreshPromise: Promise<string | null> | null = null
 
+/** Askıya alınan hesabın oturumu kapatılırken giriş ekranında gösterilecek mesaj. */
+export function useAuthNotice() {
+  return useState<string>('mit_auth_notice', () => '')
+}
+
 /**
- * Backend'e tip güvenli istek atar. 401 dönen isteklerde otomatik olarak
- * HttpOnly refresh cookie üzerinden /auth/refresh ile token yeniler ve isteği tekrarlar.
+ * Backend'e tip güvenli istek atar.
+ * - 401: HttpOnly refresh çereziyle bir kez yenilenip istek tekrarlanır. Aynı anda düşen istekler tek yenilemeyi paylaşır;
+ *   gönderildiği token zaten yenilenmişse yeniden yenilemeye gitmeden yeni token'la tekrarlanır.
+ * - 403 account_suspended: oturum kapatılır ve kullanıcı giriş ekranına sebebiyle birlikte gönderilir.
  */
 export function useApi() {
   const { public: config } = useRuntimeConfig()
@@ -36,7 +44,11 @@ export function useApi() {
         token.value = res.token
         user.value = res.user
         return res.token
-      } catch {
+      } catch (e: any) {
+        const statusCode = e?.statusCode ?? e?.response?.status
+        if (statusCode === 403 && e?.data?.code === 'account_suspended' && typeof e?.data?.message === 'string') {
+          useAuthNotice().value = e.data.message
+        }
         token.value = null
         user.value = null
         return null
@@ -65,8 +77,37 @@ export function useApi() {
       headers,
       body: options.body as Record<string, unknown> | undefined,
       query: options.query,
-      credentials: 'include'
+      credentials: 'include',
+      responseType: options.responseType as any
     })
+  }
+
+  async function endSuspendedSession(message: string) {
+    token.value = null
+    user.value = null
+    clearNuxtState(['mit_space_last'])
+    useLinks().resetLinks()
+    useAuthNotice().value = message
+    if (import.meta.client) {
+      await navigateTo('/auth/login', { replace: true })
+    }
+  }
+
+  async function parseApiError(e: any): Promise<ApiError> {
+    const data = e?.data
+    if (typeof Blob !== 'undefined' && data instanceof Blob) {
+      try {
+        const text = await data.text()
+        const parsed = JSON.parse(text)
+        if (parsed && typeof parsed.code === 'string' && typeof parsed.message === 'string') {
+          return parsed as ApiError
+        }
+      } catch {
+        // Geçersiz JSON blob durumunda genel ağ/sunucu hatasına düşülür.
+      }
+      return { code: 'network_error', message: 'Dosya hazırlanamadı. Tekrar dene.' }
+    }
+    return data ?? { code: 'network_error', message: 'Sunucuya ulaşılamadı.' }
   }
 
   async function request<TResponse, TBody = unknown>(
@@ -74,8 +115,9 @@ export function useApi() {
     path: string,
     options: RequestOptions<TBody> = {}
   ): Promise<TResponse> {
+    const sentToken = token.value
     try {
-      return await executeFetch<TResponse, TBody>(method, path, options, token.value)
+      return await executeFetch<TResponse, TBody>(method, path, options, sentToken)
     } catch (e: any) {
       const statusCode = e?.statusCode ?? e?.response?.status
       const isAuthEndpoint =
@@ -84,21 +126,33 @@ export function useApi() {
         path.startsWith('/auth/refresh') ||
         path.startsWith('/links/anonymous')
 
+      const apiErr = await parseApiError(e)
+
+      if (statusCode === 403 && apiErr.code === 'account_suspended' && !isAuthEndpoint) {
+        await endSuspendedSession(apiErr.message)
+        throw apiErr
+      }
+
       if (statusCode === 401 && !options.skipAuthRefresh && !isAuthEndpoint && import.meta.client) {
-        const newToken = await refreshAccessToken()
+        // Başka bir istek token'ı bu arada yenilediyse yeniden yenilemeye gerek yok.
+        const newToken = token.value && token.value !== sentToken ? token.value : await refreshAccessToken()
         if (newToken) {
           try {
             return await executeFetch<TResponse, TBody>(method, path, options, newToken)
           } catch (retryErr: any) {
-            const error: ApiError = retryErr?.data ?? { code: 'network_error', message: 'Sunucuya ulaşılamadı.' }
-            throw error
+            const retryApiErr = await parseApiError(retryErr)
+            if (retryApiErr.code === 'account_suspended') {
+              await endSuspendedSession(retryApiErr.message)
+            }
+            throw retryApiErr
           }
         }
+        clearNuxtState(['mit_space_last'])
+        useLinks().resetLinks()
         await navigateTo('/auth/login')
       }
 
-      const error: ApiError = e?.data ?? { code: 'network_error', message: 'Sunucuya ulaşılamadı.' }
-      throw error
+      throw apiErr
     }
   }
 
@@ -107,6 +161,8 @@ export function useApi() {
     post: <T, B = unknown>(path: string, body?: B) => request<T, B>('POST', path, { body }),
     put: <T, B = unknown>(path: string, body?: B) => request<T, B>('PUT', path, { body }),
     patch: <T, B = unknown>(path: string, body?: B) => request<T, B>('PATCH', path, { body }),
-    del: <T = void>(path: string) => request<T>('DELETE', path)
+    del: <T = void>(path: string) => request<T>('DELETE', path),
+    /** Dosya indirir (oturum ve token yenileme dahil) ve Blob döner. */
+    blob: (path: string, query?: RequestOptions<never>['query']) => request<Blob>('GET', path, { query, responseType: 'blob' })
   }
 }

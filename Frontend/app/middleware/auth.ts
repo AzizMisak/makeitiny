@@ -6,7 +6,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   }
 
   // Eski oturum çerezinde rol veya paket alanı yoksa sunucudan taze kullanıcı bilgisini çek.
-  if (!user.value?.roles || !user.value?.plan) {
+  if (import.meta.client && (!user.value?.roles || !user.value?.plan)) {
     try {
       await fetchCurrentUser()
     } catch {

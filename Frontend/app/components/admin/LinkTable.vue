@@ -7,6 +7,7 @@ const emit = defineEmits<{ changed: [] }>()
 
 const { prefix, full } = useShortUrl()
 const { setActive } = useLinkModeration()
+const { isSelf } = useAuth()
 
 function ownerLabel(l: AdminLinkItem): string {
   return l.isAnonymous ? 'Üyeliksiz' : l.userName || l.userEmail || '—'
@@ -22,13 +23,15 @@ function menuFor(l: AdminLinkItem): MenuItem[] {
     ...(l.userId && l.userId !== '0' && !props.hideOwner
       ? [{ label: 'Sahibini aç', icon: 'user', to: `/dashboard/admin/users/${l.userId}` }]
       : []),
-    {
-      label: l.isActive ? 'Yönlendirmeyi kapat' : 'Yönlendirmeyi aç',
-      icon: l.isActive ? 'ban' : 'check',
-      tone: l.isActive ? 'danger' : 'normal',
-      divider: true,
-      onSelect: () => toggle(l)
-    }
+    !l.isActive && isBlockedStatus(l.securityStatus)
+      ? { label: 'İnceleme kararını aç', icon: 'shield', divider: true, to: `/dashboard/admin/links/${l.id}` }
+      : {
+          label: l.isActive ? 'Yönlendirmeyi kapat' : 'Yönlendirmeyi aç',
+          icon: l.isActive ? 'ban' : 'check',
+          tone: l.isActive ? 'danger' : 'normal',
+          divider: true,
+          onSelect: () => toggle(l)
+        }
   ]
 }
 </script>
@@ -60,7 +63,7 @@ function menuFor(l: AdminLinkItem): MenuItem[] {
             <p class="mt-0.5 truncate text-ink-3" :title="l.target">{{ l.title ? `${l.title}, ` : '' }}{{ l.target }}</p>
           </td>
           <td v-if="!hideOwner" class="max-w-52 px-4 py-3">
-            <p class="truncate">{{ ownerLabel(l) }}</p>
+            <p class="truncate">{{ ownerLabel(l) }}<UiTag v-if="isSelf(l.userId)" tone="mark" class="ml-2">Sen</UiTag></p>
             <p v-if="l.userEmail && l.userName" class="truncate text-ink-3">{{ l.userEmail }}</p>
           </td>
           <td class="px-4 py-3"><UiStatus :tone="l.isActive ? 'ok' : 'neutral'" :label="l.isActive ? 'Açık' : 'Kapalı'" /></td>

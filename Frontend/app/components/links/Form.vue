@@ -10,8 +10,10 @@ const { checkAlias } = useLinks()
 const { prefix } = useShortUrl()
 
 const canAlias = computed(() => canUseFeature('allowCustomAlias'))
-const canPassword = computed(() => canUseFeature('allowPassword') || !!props.original?.locked)
+const canSetPassword = computed(() => canUseFeature('allowPassword'))
+const canPassword = computed(() => canSetPassword.value || !!props.original?.locked)
 const canAds = computed(() => canUseFeature('allowAds'))
+const isBlocked = computed(() => !!props.original && isBlockedStatus(props.original.securityStatus))
 
 // Kısa ad yazıldıkça müsaitlik kendiliğinden denetlenir; ayrı bir "kontrol et" düğmesi yok.
 const aliasState = ref<'idle' | 'checking' | 'free' | 'taken' | 'failed'>('idle')
@@ -19,8 +21,8 @@ let timer: ReturnType<typeof setTimeout> | null = null
 let ticket = 0
 
 watch(
-  () => draft.value.alias,
-  (raw) => {
+  [() => draft.value.alias, () => props.original?.alias],
+  ([raw]) => {
     if (timer) clearTimeout(timer)
     const alias = raw.trim()
     const mine = ++ticket
@@ -123,8 +125,15 @@ defineExpose({ aliasState })
           type="password"
           class="max-w-sm"
           autocomplete="new-password"
+          :disabled="!canSetPassword && !!original?.locked"
           :placeholder="original?.locked ? 'Mevcut parola geçerli' : 'Link parolası'"
-          :hint="original?.locked ? 'Değiştirmek istersen yeni parolayı yaz.' : 'Hedef, doğru parola girilene kadar gizli kalır.'"
+          :hint="
+            !canSetPassword && original?.locked
+              ? 'Paketinde parola değiştirme kapalı; parolayı kaldırmak için \'Herkese açık\' seçebilirsin.'
+              : original?.locked
+                ? 'Değiştirmek istersen yeni parolayı yaz.'
+                : 'Hedef, doğru parola girilene kadar gizli kalır.'
+          "
           :error="errors.password"
         />
         <UiField
@@ -186,20 +195,34 @@ defineExpose({ aliasState })
           />
         </li>
         <li class="flex flex-wrap items-center gap-x-4 gap-y-3 py-4">
-          <UiSwitch v-model="draft.adEnabled" label="Reklam gösterimi" :disabled="!canAds" />
+          <UiSwitch v-model="draft.adEnabled" label="Reklam gösterimi" :disabled="!canAds && !draft.adEnabled" />
           <div class="min-w-48 flex-1">
             <p class="flex items-center gap-2 font-medium">
               Reklam gösterimi
               <UiTag v-if="!canAds" tone="mark" icon="lock">Pro</UiTag>
             </p>
-            <p class="text-sm text-ink-3">Ara sayfada reklam alanı açılır.</p>
+            <p class="text-sm" :class="draft.adEnabled && draft.access !== 'wait' ? 'text-warn' : 'text-ink-3'">
+              {{
+                draft.access === 'wait'
+                  ? 'Bekleme sayfasında reklam alanı açılır.'
+                  : draft.adEnabled
+                    ? 'Reklam yalnızca bekleme sayfasında görünür; bu link bekletmeli değil.'
+                    : 'Reklam yalnızca bekletmeli linklerin bekleme sayfasında görünür.'
+              }}
+            </p>
           </div>
         </li>
         <li v-if="original" class="flex flex-wrap items-center gap-x-4 gap-y-3 py-4">
-          <UiSwitch v-model="draft.isActive" label="Link yayında" />
+          <UiSwitch v-model="draft.isActive" label="Link yayında" :disabled="isBlocked" />
           <div class="min-w-48 flex-1">
             <p class="font-medium">Yayında</p>
-            <p class="text-sm text-ink-3">Kapalıyken ziyaretçi "link devre dışı" sayfasını görür.</p>
+            <p class="text-sm text-ink-3">
+              {{
+                isBlocked
+                  ? 'Bu link güvenlik nedeniyle engellendiği için yayına alınamaz.'
+                  : 'Kapalıyken ziyaretçi "link devre dışı" sayfasını görür.'
+              }}
+            </p>
           </div>
         </li>
       </ul>

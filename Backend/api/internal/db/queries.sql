@@ -40,6 +40,13 @@ SET password_hash = $2,
     updated_at = NOW()
 WHERE email = $1;
 
+-- name: UpdateUserName :one
+UPDATE users
+SET name = $2,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
 -- name: DeleteUser :execrows
 DELETE FROM users
 WHERE id = $1
@@ -47,6 +54,18 @@ WHERE id = $1
       SELECT 1 FROM users_roles ur
       WHERE ur.user_id = users.id AND ur.role_id = 3
   );
+
+-- name: UnbanExpiredUsers :many
+UPDATE users
+SET is_active = TRUE,
+    ban_reason = '',
+    banned_at = NULL,
+    banned_until = NULL,
+    updated_at = NOW()
+WHERE is_active = FALSE
+  AND banned_until IS NOT NULL
+  AND banned_until <= NOW()
+RETURNING id;
 
 -- name: UnbanUser :one
 UPDATE users
@@ -140,6 +159,37 @@ WHERE is_anonymous = TRUE
   AND expires_at <= NOW()
 RETURNING id, alias, qr_code_path;
 
+-- name: UpdateUserPlan :one
+UPDATE users
+SET plan_id = $2,
+    plan_expires_at = NULL,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
+-- name: ApplyLinkPlanGrace :exec
+-- Kullanıcının en yeni max_links linki askıdan çıkar; kalan (en eski) linkler askıya alınır.
+-- Zaten askıdaki linkin silinme tarihi korunur, böylece paket değiştirerek süre uzatılamaz.
+-- max_links < 0 (sınırsız paket) ise bütün linkler askıdan çıkar.
+WITH ranked AS (
+    SELECT id, ROW_NUMBER() OVER (ORDER BY created_at DESC, id DESC) AS rn
+    FROM links
+    WHERE links.user_id = sqlc.arg(user_id)::BIGINT
+)
+UPDATE links l
+SET plan_grace_until = CASE
+        WHEN sqlc.arg(max_links)::INT < 0 OR r.rn <= sqlc.arg(max_links)::INT THEN NULL
+        ELSE COALESCE(l.plan_grace_until, sqlc.arg(grace_until)::TIMESTAMPTZ)
+    END
+FROM ranked r
+WHERE l.id = r.id;
+
+-- name: DeleteExpiredGraceLinks :many
+DELETE FROM links
+WHERE plan_grace_until IS NOT NULL
+  AND plan_grace_until <= NOW()
+RETURNING id, alias, qr_code_path;
+
 -- name: UpdateLinkQRPath :one
 UPDATE links
 SET qr_code_path = $2,
@@ -174,6 +224,10 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
 SELECT * FROM links
 WHERE user_id = $1
 ORDER BY created_at DESC;
+
+-- name: ListLinkIDsByUser :many
+SELECT id, alias FROM links
+WHERE user_id = $1;
 
 -- name: ListLinksByUserPaginated :many
 SELECT * FROM links
@@ -227,6 +281,10 @@ SET alias = $3,
     expires_at = $10,
     max_clicks = $11,
     ad_enabled = $12,
+    security_status = CASE
+        WHEN target_url <> $4 AND security_status = 'safe' THEN 'unchecked'
+        ELSE security_status
+    END,
     updated_at = NOW()
 WHERE id = $1 AND user_id = $2
 RETURNING *;
@@ -255,7 +313,7 @@ SELECT
     (SELECT COUNT(*)::BIGINT FROM users) AS total_users,
     (SELECT COUNT(*) FILTER (WHERE is_active = TRUE)::BIGINT FROM users) AS active_users,
     COUNT(*)::BIGINT AS total_links,
-    COUNT(*) FILTER (WHERE is_active = TRUE)::BIGINT AS active_links,
+    COUNT(*) FILTER (WHERE is_active = TRUE AND security_status <> 'blocked' AND security_status <> 'malicious')::BIGINT AS active_links,
     COUNT(*) FILTER (WHERE security_status = 'blocked' OR security_status = 'malicious')::BIGINT AS blocked_links,
     COALESCE(SUM(clicks), 0)::BIGINT AS total_clicks
 FROM links;
@@ -359,15 +417,19 @@ SELECT * FROM refresh_tokens
 WHERE token_hash = $1
 LIMIT 1;
 
--- name: RevokeRefreshTokenByHash :exec
+-- name: RevokeActiveRefreshToken :one
 UPDATE refresh_tokens
 SET revoked_at = NOW()
-WHERE token_hash = $1 AND revoked_at IS NULL;
+WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW()
+RETURNING *;
 
--- name: RevokeAllUserRefreshTokens :exec
-UPDATE refresh_tokens
-SET revoked_at = NOW()
-WHERE user_id = $1 AND revoked_at IS NULL;
+-- name: DeleteRefreshTokenByHash :exec
+DELETE FROM refresh_tokens
+WHERE token_hash = $1;
+
+-- name: DeleteUserRefreshTokens :exec
+DELETE FROM refresh_tokens
+WHERE user_id = $1;
 
 -- name: DeleteExpiredRefreshTokens :exec
 DELETE FROM refresh_tokens

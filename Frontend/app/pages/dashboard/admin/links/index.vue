@@ -17,6 +17,7 @@ const FILTERS: { value: AdminLinkStatusFilter; label: string }[] = [
 const route = useRoute()
 const router = useRouter()
 const { fetchAdminLinks } = useAdmin()
+const { busy: exporting, exportAdminLinks } = useExport()
 
 const links = ref<AdminLinkItem[]>([])
 const page = ref(1)
@@ -26,6 +27,7 @@ const loading = ref(true)
 const loadedOnce = ref(false)
 const error = ref('')
 const search = ref(String(route.query.ara ?? ''))
+const searchKey = ref(0)
 const filter = ref<AdminLinkStatusFilter>(
   FILTERS.some((f) => f.value === route.query.durum) ? (route.query.durum as AdminLinkStatusFilter) : 'all'
 )
@@ -67,7 +69,26 @@ watch(filter, () => {
   load(1)
 })
 
+// Üst menüden yeniden tıklanınca adres sorgusu temizlenir; ekrandaki süzgeç de ona uyar.
+watch(
+  () => route.query,
+  (q) => {
+    const nextFilter = FILTERS.some((f) => f.value === q.durum) ? (q.durum as AdminLinkStatusFilter) : 'all'
+    const nextSearch = String(q.ara ?? '')
+    if (nextFilter === filter.value && nextSearch === search.value) return
+    search.value = nextSearch
+    searchKey.value++
+    if (nextFilter !== filter.value) filter.value = nextFilter
+    else load(1)
+  }
+)
+
 onMounted(() => load(1))
+
+const exportMenu = computed(() => [
+  { label: 'CSV olarak indir', icon: 'download', disabled: !!exporting.value, onSelect: () => exportAdminLinks('csv', search.value, filter.value) },
+  { label: 'JSON olarak indir', icon: 'download', disabled: !!exporting.value, onSelect: () => exportAdminLinks('json', search.value, filter.value) }
+])
 </script>
 
 <template>
@@ -76,13 +97,28 @@ onMounted(() => load(1))
 
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <UiSegmented v-model="filter" label="Duruma göre süz" :options="FILTERS" small />
-      <UiSearchBox
-        id="admin-link-search"
-        placeholder="Kısa ad, hedef, başlık veya sahip e-postası"
-        :active="search"
-        :loading="loading"
-        @search="onSearch"
-      />
+      <div class="flex w-full min-w-0 items-center justify-end gap-2 sm:w-auto">
+        <UiMenu v-if="total > 0" label="Linkleri dışa aktar" :items="exportMenu">
+          <template #trigger="{ toggle, open }">
+            <UiIconButton
+              icon="download"
+              label="Linkleri dışa aktar"
+              :loading="exporting.startsWith('admin-links-')"
+              :aria-expanded="open"
+              aria-haspopup="menu"
+              @click="toggle"
+            />
+          </template>
+        </UiMenu>
+        <UiSearchBox
+          id="admin-link-search"
+          :key="searchKey"
+          placeholder="Kısa ad, hedef, başlık veya sahip e-postası"
+          :active="search"
+          :loading="loading"
+          @search="onSearch"
+        />
+      </div>
     </div>
 
     <UiLoadError v-if="error" :message="error" :loading="loading" @retry="load()" />

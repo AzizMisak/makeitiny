@@ -9,8 +9,13 @@ export function roleChangePrompt(user: User, next: 'admin' | 'user', action: () 
     subject: `${user.name || 'İsimsiz'} (${user.email})`,
     message: promote ? 'Yönetim paneline girebilir.' : 'Yönetim paneline giremez, standart kullanıcı olur.',
     effects: promote
-      ? ['Herkesin linkini ve ziyaret kayıtlarını görür.', 'Linkleri engelleyebilir ve silebilir.', 'Kullanıcıları askıya alabilir, paketlerini değiştirebilir.']
-      : ['Kendi linkleri ve paketi aynen kalır.'],
+      ? [
+          'Herkesin linkini ve ziyaret kayıtlarını görür.',
+          'Linkleri engelleyebilir ve silebilir.',
+          'Kullanıcıları askıya alabilir, paketlerini değiştirebilir.',
+          'Kendi paketi geçersiz olur; sınırı kalmaz, bütün özellikler açılır.'
+        ]
+      : [`Kayıtlı paketi (${user.plan?.name ?? 'Ücretsiz Paket'}) yeniden geçerli olur ve sınırları uygulanır.`, 'Kendi linkleri aynen kalır.'],
     changes: [{ label: 'Rol', from: promote ? 'Kullanıcı' : 'Yönetici', to: promote ? 'Yönetici' : 'Kullanıcı' }],
     confirmLabel: promote ? 'Yönetici yap' : 'Yetkiyi kaldır',
     tone: 'danger',

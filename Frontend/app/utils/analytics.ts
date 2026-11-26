@@ -51,7 +51,7 @@ export function countryRows(logs: LinkLogItem[]): CountryRow[] {
     }
     entry.count += 1
     if (c.lang) entry.langs.add(c.lang)
-    if (log.clickedAt > entry.lastSeen) entry.lastSeen = log.clickedAt
+    if (new Date(log.clickedAt) > new Date(entry.lastSeen)) entry.lastSeen = log.clickedAt
     map.set(c.name, entry)
   }
   return [...map.entries()]
@@ -76,8 +76,8 @@ export function timeBuckets(logs: LinkLogItem[], range: TimeRange): TimeBucket[]
   if (range === 'hourly') {
     const counts = Array.from({ length: 24 }, () => 0)
     for (const log of logs) {
-      const hour = Number.parseInt(log.clickedAt?.split(' ')[1] ?? '', 10)
-      if (hour >= 0 && hour < 24) counts[hour]! += 1
+      const at = new Date(log.clickedAt)
+      if (!Number.isNaN(at.getTime())) counts[at.getHours()]! += 1
     }
     return counts.map((count, h) => {
       const hh = String(h).padStart(2, '0')
@@ -88,7 +88,9 @@ export function timeBuckets(logs: LinkLogItem[], range: TimeRange): TimeBucket[]
   const days = range === '7d' ? 7 : range === '14d' ? 14 : 30
   const perDay = new Map<string, number>()
   for (const log of logs) {
-    const day = log.clickedAt?.split(' ')[0] ?? ''
+    const at = new Date(log.clickedAt)
+    if (Number.isNaN(at.getTime())) continue
+    const day = dayKey(at)
     perDay.set(day, (perDay.get(day) ?? 0) + 1)
   }
 

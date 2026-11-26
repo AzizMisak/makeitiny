@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/oapi-codegen/runtime"
 	openapi_types "github.com/oapi-codegen/runtime/types"
@@ -59,6 +60,24 @@ func (e AdminUpdateRoleRequestRole) Valid() bool {
 	}
 }
 
+// Defines values for ExportFormat.
+const (
+	ExportFormatCsv  ExportFormat = "csv"
+	ExportFormatJson ExportFormat = "json"
+)
+
+// Valid indicates whether the value is a known member of the ExportFormat enum.
+func (e ExportFormat) Valid() bool {
+	switch e {
+	case ExportFormatCsv:
+		return true
+	case ExportFormatJson:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdminListLinksParamsStatus.
 const (
 	AdminListLinksParamsStatusActive    AdminListLinksParamsStatus = "active"
@@ -80,6 +99,123 @@ func (e AdminListLinksParamsStatus) Valid() bool {
 	case AdminListLinksParamsStatusBlocked:
 		return true
 	case AdminListLinksParamsStatusInactive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminExportLinksParamsFormat.
+const (
+	AdminExportLinksParamsFormatCsv  AdminExportLinksParamsFormat = "csv"
+	AdminExportLinksParamsFormatJson AdminExportLinksParamsFormat = "json"
+)
+
+// Valid indicates whether the value is a known member of the AdminExportLinksParamsFormat enum.
+func (e AdminExportLinksParamsFormat) Valid() bool {
+	switch e {
+	case AdminExportLinksParamsFormatCsv:
+		return true
+	case AdminExportLinksParamsFormatJson:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminExportLinksParamsStatus.
+const (
+	AdminExportLinksParamsStatusActive    AdminExportLinksParamsStatus = "active"
+	AdminExportLinksParamsStatusAll       AdminExportLinksParamsStatus = "all"
+	AdminExportLinksParamsStatusAnonymous AdminExportLinksParamsStatus = "anonymous"
+	AdminExportLinksParamsStatusBlocked   AdminExportLinksParamsStatus = "blocked"
+	AdminExportLinksParamsStatusInactive  AdminExportLinksParamsStatus = "inactive"
+)
+
+// Valid indicates whether the value is a known member of the AdminExportLinksParamsStatus enum.
+func (e AdminExportLinksParamsStatus) Valid() bool {
+	switch e {
+	case AdminExportLinksParamsStatusActive:
+		return true
+	case AdminExportLinksParamsStatusAll:
+		return true
+	case AdminExportLinksParamsStatusAnonymous:
+		return true
+	case AdminExportLinksParamsStatusBlocked:
+		return true
+	case AdminExportLinksParamsStatusInactive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminExportUsersParamsFormat.
+const (
+	AdminExportUsersParamsFormatCsv  AdminExportUsersParamsFormat = "csv"
+	AdminExportUsersParamsFormatJson AdminExportUsersParamsFormat = "json"
+)
+
+// Valid indicates whether the value is a known member of the AdminExportUsersParamsFormat enum.
+func (e AdminExportUsersParamsFormat) Valid() bool {
+	switch e {
+	case AdminExportUsersParamsFormatCsv:
+		return true
+	case AdminExportUsersParamsFormatJson:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AdminExportUserLinksParamsFormat.
+const (
+	AdminExportUserLinksParamsFormatCsv  AdminExportUserLinksParamsFormat = "csv"
+	AdminExportUserLinksParamsFormatJson AdminExportUserLinksParamsFormat = "json"
+)
+
+// Valid indicates whether the value is a known member of the AdminExportUserLinksParamsFormat enum.
+func (e AdminExportUserLinksParamsFormat) Valid() bool {
+	switch e {
+	case AdminExportUserLinksParamsFormatCsv:
+		return true
+	case AdminExportUserLinksParamsFormatJson:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExportLinksParamsFormat.
+const (
+	ExportLinksParamsFormatCsv  ExportLinksParamsFormat = "csv"
+	ExportLinksParamsFormatJson ExportLinksParamsFormat = "json"
+)
+
+// Valid indicates whether the value is a known member of the ExportLinksParamsFormat enum.
+func (e ExportLinksParamsFormat) Valid() bool {
+	switch e {
+	case ExportLinksParamsFormatCsv:
+		return true
+	case ExportLinksParamsFormatJson:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExportLinkLogsParamsFormat.
+const (
+	ExportLinkLogsParamsFormatCsv  ExportLinkLogsParamsFormat = "csv"
+	ExportLinkLogsParamsFormatJson ExportLinkLogsParamsFormat = "json"
+)
+
+// Valid indicates whether the value is a known member of the ExportLinkLogsParamsFormat enum.
+func (e ExportLinkLogsParamsFormat) Valid() bool {
+	switch e {
+	case ExportLinkLogsParamsFormatCsv:
+		return true
+	case ExportLinkLogsParamsFormatJson:
 		return true
 	default:
 		return false
@@ -120,6 +256,11 @@ type AdminLinkItem struct {
 
 	// MaxClicks Example: 5000
 	MaxClicks *int64 `json:"maxClicks,omitempty"`
+
+	// PlanGraceUntil Doluysa link paket düşürüldüğü için askıdadır ve bu tarihte kalıcı olarak silinir.
+	//
+	// Example: 2027-01-25
+	PlanGraceUntil *string `json:"planGraceUntil,omitempty"`
 
 	// QrUrl Example: /api/links/k9Xm2pQ7vR4nL8wZ/qr
 	QrUrl string `json:"qrUrl"`
@@ -303,7 +444,9 @@ type AdminUpdateUserRequest struct {
 	// Example: 2027-01-01
 	PlanExpiresAt *string `json:"planExpiresAt,omitempty"`
 
-	// PlanId Example: 2
+	// PlanId Yönetici ve sahip hesaplarına paket atanamaz (400 plan_not_applicable).
+	//
+	// Example: 2
 	PlanId *int32 `json:"planId,omitempty"`
 }
 
@@ -366,6 +509,12 @@ type AuthResponse struct {
 	// Token Example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 	Token string `json:"token"`
 	User  User   `json:"user"`
+}
+
+// ChangePlanRequest defines model for ChangePlanRequest.
+type ChangePlanRequest struct {
+	// PlanId Example: 2
+	PlanId int32 `json:"planId"`
 }
 
 // CreateAnonymousLinkRequest defines model for CreateAnonymousLinkRequest.
@@ -453,6 +602,11 @@ type LinkItem struct {
 	// MaxClicks Example: 5000
 	MaxClicks *int64 `json:"maxClicks,omitempty"`
 
+	// PlanGraceUntil Doluysa link paket düşürüldüğü için askıdadır ve bu tarihte kalıcı olarak silinir.
+	//
+	// Example: 2027-01-25
+	PlanGraceUntil *string `json:"planGraceUntil,omitempty"`
+
 	// QrUrl Example: /api/links/k9Xm2pQ7vR4nL8wZ/qr
 	QrUrl string `json:"qrUrl"`
 
@@ -480,8 +634,10 @@ type LinkLogItem struct {
 	// Browser Example: Chrome
 	Browser string `json:"browser"`
 
-	// ClickedAt Example: 2026-11-12 11:45:00
-	ClickedAt string `json:"clickedAt"`
+	// ClickedAt UTC, RFC 3339 biçiminde. Arayüz yerel saate çevirir.
+	//
+	// Example: 2026-11-12T08:45:00Z
+	ClickedAt time.Time `json:"clickedAt"`
 
 	// CountryCode Example: TR
 	CountryCode string `json:"countryCode"`
@@ -617,11 +773,24 @@ type RegisterRequest struct {
 
 // ResetPasswordRequest defines model for ResetPasswordRequest.
 type ResetPasswordRequest struct {
+	// CurrentPassword Kendi şifresini değiştiren kullanıcı için mevcut parola zorunludur (admin/owner başkasının şifresini sıfırlarken gerekmez).
+	//
+	// Example: EskiSifre123
+	CurrentPassword *string `json:"currentPassword,omitempty"`
+
 	// Email Example: aziz@makeitiny.com
 	Email openapi_types.Email `json:"email"`
 
 	// NewPassword Example: YeniGucluSifre123
 	NewPassword string `json:"newPassword"`
+}
+
+// UpdateCurrentUserRequest defines model for UpdateCurrentUserRequest.
+type UpdateCurrentUserRequest struct {
+	// Name Baştaki ve sondaki boşluklar kırpılır.
+	//
+	// Example: Aziz
+	Name string `json:"name"`
 }
 
 // UpdateLinkRequest defines model for UpdateLinkRequest.
@@ -697,6 +866,9 @@ type User struct {
 	Roles []string `json:"roles"`
 }
 
+// ExportFormat defines model for ExportFormat.
+type ExportFormat string
+
 // AdminListLinkLogsParams defines parameters for AdminListLinkLogs.
 type AdminListLinkLogsParams struct {
 	Page  *int32 `form:"page,omitempty" json:"page,omitempty"`
@@ -714,6 +886,19 @@ type AdminListLinksParams struct {
 // AdminListLinksParamsStatus defines parameters for AdminListLinks.
 type AdminListLinksParamsStatus string
 
+// AdminExportLinksParams defines parameters for AdminExportLinks.
+type AdminExportLinksParams struct {
+	Format *AdminExportLinksParamsFormat `form:"format,omitempty" json:"format,omitempty"`
+	Search *string                       `form:"search,omitempty" json:"search,omitempty"`
+	Status *AdminExportLinksParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+}
+
+// AdminExportLinksParamsFormat defines parameters for AdminExportLinks.
+type AdminExportLinksParamsFormat string
+
+// AdminExportLinksParamsStatus defines parameters for AdminExportLinks.
+type AdminExportLinksParamsStatus string
+
 // AdminListUsersParams defines parameters for AdminListUsers.
 type AdminListUsersParams struct {
 	Page   *int32  `form:"page,omitempty" json:"page,omitempty"`
@@ -721,17 +906,50 @@ type AdminListUsersParams struct {
 	Search *string `form:"search,omitempty" json:"search,omitempty"`
 }
 
+// AdminExportUsersParams defines parameters for AdminExportUsers.
+type AdminExportUsersParams struct {
+	Format *AdminExportUsersParamsFormat `form:"format,omitempty" json:"format,omitempty"`
+	Search *string                       `form:"search,omitempty" json:"search,omitempty"`
+}
+
+// AdminExportUsersParamsFormat defines parameters for AdminExportUsers.
+type AdminExportUsersParamsFormat string
+
+// AdminExportUserLinksParams defines parameters for AdminExportUserLinks.
+type AdminExportUserLinksParams struct {
+	Format *AdminExportUserLinksParamsFormat `form:"format,omitempty" json:"format,omitempty"`
+}
+
+// AdminExportUserLinksParamsFormat defines parameters for AdminExportUserLinks.
+type AdminExportUserLinksParamsFormat string
+
 // ListLinksParams defines parameters for ListLinks.
 type ListLinksParams struct {
 	Page  *int32 `form:"page,omitempty" json:"page,omitempty"`
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ExportLinksParams defines parameters for ExportLinks.
+type ExportLinksParams struct {
+	Format *ExportLinksParamsFormat `form:"format,omitempty" json:"format,omitempty"`
+}
+
+// ExportLinksParamsFormat defines parameters for ExportLinks.
+type ExportLinksParamsFormat string
+
 // ListLinkLogsParams defines parameters for ListLinkLogs.
 type ListLinkLogsParams struct {
 	Page  *int32 `form:"page,omitempty" json:"page,omitempty"`
 	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// ExportLinkLogsParams defines parameters for ExportLinkLogs.
+type ExportLinkLogsParams struct {
+	Format *ExportLinkLogsParamsFormat `form:"format,omitempty" json:"format,omitempty"`
+}
+
+// ExportLinkLogsParamsFormat defines parameters for ExportLinkLogs.
+type ExportLinkLogsParamsFormat string
 
 // GetLinkQrParams defines parameters for GetLinkQr.
 type GetLinkQrParams struct {
@@ -762,6 +980,12 @@ type RegisterJSONRequestBody = RegisterRequest
 // ResetPasswordJSONRequestBody defines body for ResetPassword for application/json ContentType.
 type ResetPasswordJSONRequestBody = ResetPasswordRequest
 
+// UpdateCurrentUserJSONRequestBody defines body for UpdateCurrentUser for application/json ContentType.
+type UpdateCurrentUserJSONRequestBody = UpdateCurrentUserRequest
+
+// ChangeCurrentUserPlanJSONRequestBody defines body for ChangeCurrentUserPlan for application/json ContentType.
+type ChangeCurrentUserPlanJSONRequestBody = ChangePlanRequest
+
 // CreateLinkJSONRequestBody defines body for CreateLink for application/json ContentType.
 type CreateLinkJSONRequestBody = CreateLinkRequest
 
@@ -779,6 +1003,9 @@ type ServerInterface interface {
 	// AdminListLinks Sistemdeki tüm linkleri filtreli ve sayfalı olarak listele (admin/owner)
 	// (GET /admin/links)
 	AdminListLinks(w http.ResponseWriter, r *http.Request, params AdminListLinksParams)
+	// AdminExportLinks Filtreye uyan tüm linkleri CSV ya da JSON olarak indir (admin/owner)
+	// (GET /admin/links/export)
+	AdminExportLinks(w http.ResponseWriter, r *http.Request, params AdminExportLinksParams)
 	// AdminDeleteLink Herhangi bir linki sistemden sil (admin/owner)
 	// (DELETE /admin/links/{id})
 	AdminDeleteLink(w http.ResponseWriter, r *http.Request, id string)
@@ -800,12 +1027,18 @@ type ServerInterface interface {
 	// AdminListUsers Sistemdeki tüm kullanıcıları filtreli ve sayfalı olarak listele (admin/owner)
 	// (GET /admin/users)
 	AdminListUsers(w http.ResponseWriter, r *http.Request, params AdminListUsersParams)
+	// AdminExportUsers Arama filtresine uyan tüm kullanıcıları CSV ya da JSON olarak indir (admin/owner)
+	// (GET /admin/users/export)
+	AdminExportUsers(w http.ResponseWriter, r *http.Request, params AdminExportUsersParams)
 	// AdminGetUser Tek bir kullanıcının yönetici detayını getir (admin/owner)
 	// (GET /admin/users/{id})
 	AdminGetUser(w http.ResponseWriter, r *http.Request, id string)
 	// AdminUpdateUser Kullanıcının aktiflik durumunu (ban) veya paketini güncelle (admin/owner)
 	// (PATCH /admin/users/{id})
 	AdminUpdateUser(w http.ResponseWriter, r *http.Request, id string)
+	// AdminExportUserLinks Belirli bir kullanıcının tüm linklerini CSV ya da JSON olarak indir (admin/owner)
+	// (GET /admin/users/{id}/links/export)
+	AdminExportUserLinks(w http.ResponseWriter, r *http.Request, id string, params AdminExportUserLinksParams)
 	// Login Kullanıcı girişi yap
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -827,6 +1060,12 @@ type ServerInterface interface {
 	// GetCurrentUser Oturumdaki kullanıcı bilgisini, rollerini, paketini ve kullanım kotasını getir
 	// (GET /auth/user)
 	GetCurrentUser(w http.ResponseWriter, r *http.Request)
+	// UpdateCurrentUser Oturumdaki kullanıcının adını değiştir
+	// (PATCH /auth/user)
+	UpdateCurrentUser(w http.ResponseWriter, r *http.Request)
+	// ChangeCurrentUserPlan Oturumdaki standart kullanıcının paketini değiştir
+	// (PUT /auth/user/plan)
+	ChangeCurrentUserPlan(w http.ResponseWriter, r *http.Request)
 	// GetHealth Sağlık kontrolü
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -842,9 +1081,15 @@ type ServerInterface interface {
 	// CheckAlias Özel takma ad (custom alias) müsait mi kontrol et
 	// (GET /links/check-alias/{alias})
 	CheckAlias(w http.ResponseWriter, r *http.Request, alias string)
+	// ExportLinks Kullanıcının bütün linklerini CSV ya da JSON olarak indir
+	// (GET /links/export)
+	ExportLinks(w http.ResponseWriter, r *http.Request, params ExportLinksParams)
 	// ListLinkLogs Kullanıcıya ait bir linkin tıklama loglarını sayfalı olarak listele
 	// (GET /links/logs/{id})
 	ListLinkLogs(w http.ResponseWriter, r *http.Request, id string, params ListLinkLogsParams)
+	// ExportLinkLogs Bir linkin ziyaret kayıtlarını CSV ya da JSON olarak indir
+	// (GET /links/logs/{id}/export)
+	ExportLinkLogs(w http.ResponseWriter, r *http.Request, id string, params ExportLinkLogsParams)
 	// DeleteLink Kullanıcıya ait bir linki sil
 	// (DELETE /links/{id})
 	DeleteLink(w http.ResponseWriter, r *http.Request, id string)
@@ -995,6 +1240,65 @@ func (siw *ServerInterfaceWrapper) AdminListLinks(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AdminListLinks(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdminExportLinks operation middleware
+func (siw *ServerInterfaceWrapper) AdminExportLinks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AdminExportLinksParams
+
+	// ------------- Optional query parameter "format" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "format", r.URL.Query(), &params.Format, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "format"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "format", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", r.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "search"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "search", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminExportLinks(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1207,6 +1511,52 @@ func (siw *ServerInterfaceWrapper) AdminListUsers(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// AdminExportUsers operation middleware
+func (siw *ServerInterfaceWrapper) AdminExportUsers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AdminExportUsersParams
+
+	// ------------- Optional query parameter "format" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "format", r.URL.Query(), &params.Format, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "format"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "format", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "search" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", r.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "search"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "search", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminExportUsers(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AdminGetUser operation middleware
 func (siw *ServerInterfaceWrapper) AdminGetUser(w http.ResponseWriter, r *http.Request) {
 
@@ -1250,6 +1600,48 @@ func (siw *ServerInterfaceWrapper) AdminUpdateUser(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AdminUpdateUser(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AdminExportUserLinks operation middleware
+func (siw *ServerInterfaceWrapper) AdminExportUserLinks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params AdminExportUserLinksParams
+
+	// ------------- Optional query parameter "format" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "format", r.URL.Query(), &params.Format, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "format"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "format", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdminExportUserLinks(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1348,6 +1740,34 @@ func (siw *ServerInterfaceWrapper) GetCurrentUser(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetCurrentUser(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCurrentUser operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCurrentUser(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCurrentUser(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChangeCurrentUserPlan operation middleware
+func (siw *ServerInterfaceWrapper) ChangeCurrentUserPlan(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangeCurrentUserPlan(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1471,6 +1891,39 @@ func (siw *ServerInterfaceWrapper) CheckAlias(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ExportLinks operation middleware
+func (siw *ServerInterfaceWrapper) ExportLinks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExportLinksParams
+
+	// ------------- Optional query parameter "format" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "format", r.URL.Query(), &params.Format, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "format"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "format", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportLinks(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListLinkLogs operation middleware
 func (siw *ServerInterfaceWrapper) ListLinkLogs(w http.ResponseWriter, r *http.Request) {
 
@@ -1517,6 +1970,48 @@ func (siw *ServerInterfaceWrapper) ListLinkLogs(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListLinkLogs(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportLinkLogs operation middleware
+func (siw *ServerInterfaceWrapper) ExportLinkLogs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExportLinkLogsParams
+
+	// ------------- Optional query parameter "format" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "format", r.URL.Query(), &params.Format, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "format"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "format", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportLinkLogs(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1841,6 +2336,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/auth/resetpass", wrapper.ResetPassword)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/auth/user", wrapper.DeleteUser)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/auth/user", wrapper.GetCurrentUser)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/auth/user", wrapper.UpdateCurrentUser)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/auth/user/plan", wrapper.ChangeCurrentUserPlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links", wrapper.ListLinks)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/links", wrapper.CreateLink)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/links/anonymous", wrapper.CreateAnonymousLink)
@@ -1851,14 +2348,19 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/links/{id}/qr", wrapper.DeleteLinkQr)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links/{id}/qr", wrapper.GetLinkQr)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/links/{id}/qr", wrapper.GenerateLinkQr)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links/export", wrapper.ExportLinks)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links/logs/{id}/export", wrapper.ExportLinkLogs)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/links/logs/{id}", wrapper.ListLinkLogs)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/stats", wrapper.AdminGetStats)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/links", wrapper.AdminListLinks)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/links/export", wrapper.AdminExportLinks)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/admin/links/{id}", wrapper.AdminDeleteLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/links/{id}", wrapper.AdminGetLink)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/admin/links/{id}", wrapper.AdminUpdateLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/link-logs/{id}", wrapper.AdminListLinkLogs)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/users", wrapper.AdminListUsers)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/users/export", wrapper.AdminExportUsers)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/users/{id}/links/export", wrapper.AdminExportUserLinks)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/admin/users/{id}", wrapper.AdminGetUser)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/admin/users/{id}", wrapper.AdminUpdateUser)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/admin/user-role/{id}", wrapper.AdminUpdateUserRole)

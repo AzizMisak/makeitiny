@@ -1,20 +1,23 @@
 <script setup lang="ts">
-import type { LinkPreview } from '~/types/link'
+import type { WaitInfo } from '~/types/link'
 
 definePageMeta({ layout: 'visitor' })
 
 const route = useRoute()
 const { public: config } = useRuntimeConfig()
-const { display } = useShortUrl()
+const { display, full } = useShortUrl()
 const alias = computed(() => String(route.params.alias ?? ''))
+const ticket = computed(() => String(route.query.t ?? ''))
 
 useHead({ title: () => `Yönlendiriliyor: ${alias.value} | makeiTiny` })
 
 const loading = ref(true)
+const going = ref(false)
 const error = ref('')
-const target = ref('')
+const expired = ref(false)
 const total = ref(0)
 const left = ref(0)
+const adEnabled = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 
 const progress = computed(() => (total.value > 0 ? (left.value / total.value) * 100 : 0))
@@ -24,23 +27,59 @@ function stop() {
   timer = null
 }
 
-function go() {
-  if (target.value && left.value <= 0) window.location.href = target.value
+async function fail(e: any) {
+  const code = e?.data?.code
+  if (code === 'ticket_invalid') {
+    expired.value = true
+    return
+  }
+  if (code === 'link_locked') {
+    await navigateTo(`/unlock/${encodeURIComponent(alias.value)}`, { replace: true })
+    return
+  }
+  const reason = reasonFromCode(code)
+  if (reason) {
+    await navigateTo(`/error/${encodeURIComponent(alias.value)}?reason=${reason}`, { replace: true })
+    return
+  }
+  error.value = e?.data?.message ?? 'Link bilgisi alınamadı.'
+}
+
+// Hedef adres yalnızca bilet süresi dolunca, tek kullanımlık olarak verilir.
+async function go() {
+  if (going.value || left.value > 0) return
+  going.value = true
+  try {
+    const res = await $fetch<{ target: string }>(`${config.routerBase}/${encodeURIComponent(alias.value)}/continue`, {
+      method: 'POST',
+      body: { ticket: ticket.value }
+    })
+    window.location.href = res.target
+  } catch (e: any) {
+    going.value = false
+    if (e?.data?.code === 'wait_not_finished') {
+      await start()
+      return
+    }
+    await fail(e)
+  }
 }
 
 async function start() {
   stop()
   loading.value = true
   error.value = ''
+  expired.value = false
+  if (!ticket.value) {
+    expired.value = true
+    loading.value = false
+    return
+  }
   try {
-    const preview = await $fetch<LinkPreview>(`${config.routerBase}/${alias.value}/preview`)
-    if (preview.locked) {
-      await navigateTo(`/unlock/${alias.value}`, { replace: true })
-      return
-    }
-    target.value = preview.target
-    total.value = preview.waitEnabled && preview.waitSeconds > 0 ? preview.waitSeconds : 0
-    left.value = total.value
+    const info = await $fetch<WaitInfo>(`${config.routerBase}/${encodeURIComponent(alias.value)}/wait`, { query: { t: ticket.value } })
+    total.value = Math.max(info.waitSeconds, info.remainingSeconds)
+    left.value = info.remainingSeconds
+    adEnabled.value = info.adEnabled
     if (left.value <= 0) {
       go()
       return
@@ -53,12 +92,7 @@ async function start() {
       }
     }, 1000)
   } catch (e: any) {
-    const reason = reasonFromCode(e?.data?.code)
-    if (reason) {
-      await navigateTo(`/error/${alias.value}?reason=${reason}`, { replace: true })
-      return
-    }
-    error.value = e?.data?.message ?? 'Link bilgisi alınamadı.'
+    await fail(e)
   } finally {
     loading.value = false
   }
@@ -78,6 +112,12 @@ onBeforeUnmount(stop)
         <UiSpinner :size="32" class="text-brand" />
         <p class="mt-5 text-lg text-ink-2">Link hazırlanıyor</p>
       </template>
+      <template v-else-if="expired">
+        <UiIcon name="clock" :size="36" class="text-ink-3" />
+        <p class="mt-4 text-lg">Bu bekleme sayfasının süresi geçmiş.</p>
+        <p class="mt-1 text-ink-2">Linki baştan açarsan geri sayım yeniden başlar.</p>
+        <UiButton :href="full(alias)" icon="refresh" class="mt-5">Linki baştan aç</UiButton>
+      </template>
       <template v-else-if="error">
         <UiIcon name="alert" :size="36" class="text-danger" />
         <p class="mt-4 text-lg">{{ error }}</p>
@@ -94,10 +134,10 @@ onBeforeUnmount(stop)
       <div class="h-full bg-mark transition-[width] duration-1000 ease-linear" :style="{ width: `${progress}%` }" />
     </div>
 
-    <!-- Reklam için ayrılmış alan -->
-    <div class="mt-8 flex min-h-36 items-center justify-center border border-dashed border-line-2 text-sm text-ink-3">Reklam alanı</div>
+    <!-- Reklam alanı yalnızca link sahibi reklamı açtıysa gösterilir. -->
+    <div v-if="adEnabled" class="mt-8 flex min-h-36 items-center justify-center border border-dashed border-line-2 text-sm text-ink-3">Reklam alanı</div>
 
-    <UiButton size="lg" block class="mt-8" :disabled="loading || !!error || left > 0" @click="go">
+    <UiButton size="lg" block class="mt-8" :loading="going" loading-label="Hedefe gidiliyor" :disabled="loading || !!error || expired || left > 0" @click="go">
       {{ left > 0 || loading ? 'Bekleniyor' : 'Hedefe git' }}
     </UiButton>
   </div>

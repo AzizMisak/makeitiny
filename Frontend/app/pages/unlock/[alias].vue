@@ -3,7 +3,7 @@ definePageMeta({ layout: 'visitor' })
 
 const route = useRoute()
 const { public: config } = useRuntimeConfig()
-const { display } = useShortUrl()
+const { display, full } = useShortUrl()
 const alias = computed(() => String(route.params.alias ?? ''))
 
 useHead({ title: () => `Parolalı link: ${alias.value} | makeiTiny` })
@@ -23,7 +23,7 @@ async function submit() {
   error.value = ''
   loading.value = true
   try {
-    const res = await $fetch<{ target: string }>(`${config.routerBase}/${alias.value}/unlock`, {
+    const res = await $fetch<{ target: string }>(`${config.routerBase}/${encodeURIComponent(alias.value)}/unlock`, {
       method: 'POST',
       body: { password: password.value }
     })
@@ -34,9 +34,14 @@ async function submit() {
     }
     error.value = 'Hedef adres alınamadı. Tekrar dene.'
   } catch (e: any) {
+    if (e?.data?.code === 'link_not_locked') {
+      leaving.value = true
+      window.location.href = full(alias.value)
+      return
+    }
     const reason = reasonFromCode(e?.data?.code)
     if (reason) {
-      await navigateTo(`/error/${alias.value}?reason=${reason}`, { replace: true })
+      await navigateTo(`/error/${encodeURIComponent(alias.value)}?reason=${reason}`, { replace: true })
       return
     }
     error.value = e?.data?.message ?? 'Parola doğrulanamadı. Tekrar dene.'

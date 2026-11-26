@@ -47,8 +47,8 @@ const changes = computed(() => {
 })
 
 const outcome = computed(() => {
-  if (!active.value) return 'Ziyaretçi "link devre dışı" sayfasını görür.'
   if (isBlockedStatus(decision.value)) return 'Ziyaretçi güvenlik uyarısı görür, hedefe gidemez.'
+  if (!active.value) return 'Ziyaretçi "link devre dışı" sayfasını görür.'
   return 'Ziyaretçi hedefe ulaşır.'
 })
 
@@ -110,9 +110,11 @@ async function apply() {
     <div class="flex items-center justify-between gap-4 border-t border-line px-5 py-4">
       <div>
         <p class="font-semibold">Yönlendirme</p>
-        <p class="text-sm text-ink-2">{{ active ? 'Açık' : 'Kapalı' }}</p>
+        <p class="text-sm text-ink-2">
+          {{ isBlockedStatus(decision) ? 'Engelli veya zararlı link yayına alınamaz.' : active ? 'Açık' : 'Kapalı' }}
+        </p>
       </div>
-      <UiSwitch v-model="active" label="Yönlendirme açık" />
+      <UiSwitch v-model="active" :disabled="isBlockedStatus(decision)" label="Yönlendirme açık" />
     </div>
 
     <div class="border-t border-line px-5 py-4">

@@ -14,7 +14,7 @@ useHead({ title: () => `${info.value.title} | makeiTiny` })
 
 function retry() {
   retrying.value = true
-  window.location.href = full(encodeURIComponent(alias.value))
+  window.location.href = full(alias.value)
 }
 </script>
 

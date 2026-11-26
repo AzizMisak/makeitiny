@@ -115,3 +115,101 @@ Bu doküman, MakeItTiny projesinde gerçekleştirilen altyapı, mimari ve geliş
 - **Yönetim paneli:** Ayrı iskelete taşındı. "Hızlı moderasyon" yerine beş seçenekli inceleme kararı geldi. Owner rol sayfası tüm yönetim ekibini listeler.
 - **Landing:** Çalışan kısaltma tezgâhı, denenebilir ziyaretçi ekranları, tıklama kaydı gösterimi ve şerit metre gezgini eklendi.
 - **Doğruluk düzeltmeleri:** Grafikler en yeni 500 ziyaretten hesaplanıyor, parola değişince oturumların kapanacağı söyleniyor, parolalı linklerle ilgili eski tıklama notu ve ücretsiz pakette olmayan özelliklerin tanıtımı kaldırıldı.
+
+---
+
+## 11. Ad Değiştirme, Paket Muafiyeti ve Analiz Düzeni
+- **Ad değiştirme (ADR-014):** `PATCH /auth/user` eklendi (spec, `UpdateUserName` sorgusu, servis, handler). Hesap ayarlarında ad, satırın içinde düzenleniyor.
+- **Yetkili hesaplar:** Yönetici ve sahibe paket atanması backend'de `plan_not_applicable` ile engellendi. Genel bakış, Paketim, Hesap ayarları ve yönetim ekranları "Pakete tabi değil" gösteriyor.
+- **"Sen" işareti:** Yönetimde kullanıcılar, link sahibi ve roller listelerinde oturumdaki kişi işaretleniyor; kendi kullanıcı sayfasında "Bu sensin" uyarısı çıkıyor.
+- **Analiz:** Cihaz, Tarayıcı, İşletim sistemi ve Ülkeler bölümleri ayrı, ince çerçeveli kutulara alındı.
+
+---
+
+## 12. Denetim Sonrası Güvenlik, Yarış Durumu ve Arayüz Tutarlılık Düzeltmeleri
+- **Worker & Oturum Dayanıklılığı (`Backend/api`):**
+  - `FlushLogsQueue` için NUL bayt temizleme (`sanitizePGText`) ve kalıcı PostgreSQL hatalarında (`22xxx`/`23xxx`) satır bazlı düşüş (`insertLogsOneByOne`) eklendi; tek bozuk log kaydının tüm kuyruğu kilitlemesi önlendi.
+  - `RevokeActiveRefreshToken` sorgusuna `expires_at > NOW()` eklendi; süresi dolmuş refresh token ile çakışan isteklerin diğer cihazlardaki aktif oturumları kapatması engellendi.
+  - `PendingClicks` ve `TotalPendingClicks` aktarım sırasındaki `clicks:deltas:proc:*` anahtarlarını da dahil edecek şekilde güncellendi.
+- **SSRF, RBAC, Kota ve Link Durum Kuralları (`Backend/api`, `Backend/router`, `nginx`):**
+  - IPv6 zone bypass'ı (`IsBlockedIP` & `IsInternalHost`), kısa/oktal/hex sayısal IPv4 biçimleri (`127.1`, `0x7f.0.0.1`) ve `PUBLIC_BASE_URL` üzerinde kendine yönlendirme (`IsSelfRedirect`) engellendi.
+  - `AdminUpdateUser`, `AdminUpdateUserRole` ve `DeleteUser` içinde `GetRoles` hataları fail-closed hale getirildi; yetki denetimi paket muafiyeti kontrolünün önüne alındı; paket değişiminde eski/süresi dolmuş `plan_expires_at` temizlendi; `UserRepository.Delete` yalnızca `rows > 0` ise Redis/QR temizliği yapacak şekilde korundu.
+  - Engelli/zararlı linklerin `isActive: true` olarak açılması engellendi ve `GetPlatformStats` aktif link sayacı `CountAdminLinks` ile hizalandı.
+  - `CreateLink` kota denetimi PostgreSQL advisory lock ile atomikleştirildi; `Login` var olmayan e-postalarda sabit süreli Argon2id doğrulaması çalıştırır; `extractClientIP` yalnızca güvenilir proxy üzerinden gelen IP başlıklarını kabul eder.
+  - `router` üzerinde `clicks` ve `max_clicks` kontrolü/artırımı atomik Lua betiği (`recordClickLua`) ve koşullu PostgreSQL artışı ile yarış durumuna kapatıldı; `GetLinkByAlias` `banned_until <= NOW()` kontrolünü SQL'e dahil etti; `WaitInfo`/`Continue` sonradan parolayla kilitlenen linkleri reddeder; `HEAD /{link}` tıklama saymaz; `oapi-codegen` parametre hataları JSON `ApiError` döner; Nginx'e güvenlik başlıkları ve servislere dinamik `Vary: Origin` CORS eklendi; OpenAPI şemaları güncellendi.
+- **Frontend Tutarlılık ve Hata Düzeltmeleri (`Frontend/app`):**
+  - `linkState.ts` ve `DecisionPanel.vue` içinde `blocked`/`malicious` önceliği router ile aynı sıraya alındı.
+  - `useApi().blob` JSON hata yanıtlarını okuyarak `403 account_suspended` ve sunucu hata mesajlarını korur.
+  - Oturum değişimi/kapanışı (`login`, `register`, `logout`, `deleteAccount`, `changePassword`, `endSuspendedSession`, 401 refresh düşüşü) için `mit_space_last` temizliği tamamlandı ve kullanılmayan `useAdmin` önbellekleri kaldırıldı.
+  - `error.vue` SSR/istemci path uyuşmazlığı giderildi; `/w`, `/unlock`, `/error` rotalarında `encodeURIComponent` ve `?t=` aktarımları düzeltildi; `RegisterForm` e-posta kuralı `LoginForm` ile eşitlendi; ban süresi her açılışta anlık hesaplanır.
+
+---
+
+## 13. Hata Denetimi Düzeltmeleri, Özel Hata Sayfası ve Dışa Aktarma
+- **Yeni:** Özel hata sayfası (`app/error.vue`, gerçek 404 durum koduyla). Linklerim ve link ziyaretleri için CSV / JSON dışa aktarma (ADR-015).
+- **Güvenlik:**
+  - Yöneticinin sahip ya da başka bir yöneticinin parolasını değiştirmesi engellendi.
+  - İç ağ adreslerine kısa link verilmiyor ve router iç ağa istek atmıyor (SSRF).
+  - Refresh token rotasyonu atomik hâle getirildi.
+  - Nginx, sahtelenebilir ülke başlıklarını router'a iletmiyor.
+- **Router:**
+  - Bekleme bileti eklendi: bekleme süresi ve tıklama sınırı atlanamıyor, son geçerli ziyaretçi hedefe ulaşıyor.
+  - Engelli linkler doğru ekranı gösteriyor.
+  - Ölü hedef 30 saniye önbellekleniyor.
+  - `GET /r/` hata ekranına gidiyor.
+  - Sunucuya zaman aşımları ve düzgün kapanış eklendi.
+- **Veri tutarlılığı:**
+  - Tıklama farkları link kimliğiyle tutuluyor.
+  - Güncellemede önbellek siliniyor; banlı kullanıcının linki yeniden açılmıyor.
+  - Worker'da veri kaybı ve kapanış yarışı giderildi.
+  - Süresi dolan askılar kendiliğinden kalkıyor.
+  - Hedef değişince "güvenli" incelemesi sıfırlanıyor.
+- **Arayüz:**
+  - Ad değiştirmedeki "s" harfi hatası giderildi.
+  - Askıya alınan oturum sebebiyle kapanıyor.
+  - Çıkışta panel hafızası sıfırlanıyor.
+  - Reklam anahtarı alt pakette kapatılabiliyor ve yalnızca bekleme sayfasında gösteriliyor.
+  - Tıklama saatleri yerel saate çevriliyor.
+  - Yönetim detayları hatayı gizlemiyor.
+  - Üst menüden dönünce süzgeçler sıfırlanıyor.
+- **Testler:** `Backend/api` ve `Backend/router` için birim testleri eklendi (`go test ./...`).
+
+---
+
+## 14. Kapsamlı Denetim Sonrası Hata ve Mantık Düzeltmeleri
+- **Backend API (`Backend/api`, `openapi/api.yaml`):**
+  - `AdminUpdateLink` içindeki `securityStatus`/`isActive` sıralama hatası giderildi; engelli linkin engeli kaldırılırken tek istekte yayına alınabilmesi ve engelli durumda `403 forbidden` dönmesi sağlandı.
+  - Kendi parolasını değiştiren kullanıcılar için `ResetPasswordRequest.currentPassword` zorunlu hale getirildi (yanlış mevcut parolada `400 invalid_current_password`), hata ve başarı mesajları ayrıştırıldı.
+  - `IsSelfRedirect` yol kanonikleştirmesi (`path.Clean`) ve `validateTargetURL` hatalı adres (`not-a-valid-url` → `ErrInvalidTargetURL`) ayrımı düzeltildi.
+  - `csvSafe` formül koruması `\n` ve baştaki boşlukları kapsayacak şekilde güçlendirildi; refresh çerezi HTTPS'de `Secure` bayrağını dinamik alır.
+  - Parola uzunluk denetimi UTF-8 rune sayısına çevrildi; `Register` ad doğrulaması, `UpdateLink`/`AdminUpdateLink` boş alan reddi, `waitSeconds` üst sınırı (`300`), `AdminListLinks` `status` enum denetimi, `ValidatePlanInput` fiyat üst sınırı ve JSON `ApiError` parametre hata yöneticisi eklendi.
+  - `SetRole` işlem içine alındı, `UserRepository.Delete` hata kontrolü ve `CleanupExpiredAnonymousLinks` `reach:` temizliği düzeltildi; tıklama fark anahtarları `clicks:deltas:procs` kümesi üzerinden `O(1)` izlemeye alındı.
+- **Backend Router & Altyapı (`Backend/router`, `openapi/router.yaml`, `docker-compose.yml`):**
+  - `recordClickLua` `link:{alias}` yokken `max_clicks` atlamasını önlemek için PostgreSQL fallback'ine yönlendirildi; fallback hata kontrolü sıkılaştırıldı ve `pendingClicks` tam Redis `SCAN` yerine `SMEMBERS` ile `flushing` yarışı korumalı hale getirildi.
+  - `checkTargetReachable` için `HEAD`/`GET` ayrı zaman aşımları, genişletilmiş `GET` (`Range: bytes=0-0`) fallback'i ve Cloudflare WAF-503 algılaması eklendi.
+  - `POST /{link}/unlock` için Redis IP+alias hız sınırı (`429`), Argon2id eşzamanlılık semaforu (`8`), `64 KB` gövde sınırı ve `mit_unlock_ref` ile orijinal `Referer` koruması eklendi.
+  - `/r/{alias}/` sonda eğik çizgi desteği, bilinmeyen alt yolların hata sayfasına yönlendirilmesi, `WaitInfo` boş `t` için `400` yanıtı ve geçici Redis hatalarının `ticket_invalid`'den ayrılması sağlandı; `postgres`/`redis` healthcheck'leri eklendi.
+- **Frontend (`Frontend/app`):**
+  - Yönetici karar paneli ve tablosunda engelli link anahtarı/menüsü backend kurallarıyla hizalandı; kullanıcı link ayarlarında engelli link ve paket dışı parola kontrolleri düzeltildi.
+  - `useUnsavedGuard` oturum kapanış/yönlendirme çakışmaları ve `settings.vue` mevcut parola alanı eklendi.
+  - Hata sayfasında çift `encodeURIComponent`, link detayda `Analiz` sekmesinin yeniden yüklenmesi, `Form.vue` `aliasState` sıfırlaması, `useApi.ts` `403 account_suspended` mesajı, SSR `auth.ts` yönlendirme koruması, `UiTape` sıfır/küçük kota gösterimi, admin kullanıcı detayı tarih/uyarı kontrolleri, anonim QR `@error` geri dönüşü ve mobil alt çubuk boşluğu düzeltildi.
+
+## 15. Kullanıcının Paket Değiştirmesi ve Paket Düşürmede Askı
+- **Backend:** `PUT /auth/user/plan` uç noktası, `00005_link_plan_grace.sql` migration'ı (`links.plan_grace_until`), `UpdateUserPlan` / `ApplyLinkPlanGrace` / `DeleteExpiredGraceLinks` sorguları, işlem içi `UserRepository.ChangePlan`, `AuthService.ChangeOwnPlan` ve worker'da `CleanupExpiredGraceLinks` eklendi. `LinkItem.planGraceUntil` alanı döner. `sqlc` ve `oapi-codegen` kodları yeniden üretildi.
+- **Frontend:** Paketim sayfasına onay pencereli "Bu pakete geç" düğmeleri, `useAuth().changePlan` ve link durumunda "Askıda" (silinme tarihiyle) eklendi.
+
+---
+
+## 16. Yönetici Link İnceleme Sayfasına Grafiksel Analiz Eklenmesi
+- **Frontend:** Yönetici link inceleme sayfasında ([admin/links/[id].vue](file:///e:/Projeler/makeitiny/Frontend/app/pages/dashboard/admin/links/%5Bid%5D.vue)) `Ziyaretler` sekmesindeki log tablosunun altına, yönetim panelinin mavi tema token'larıyla uyumlu grafiksel analiz bölümü (`LinksAnalysis` + `ChartBars`/`ChartShares`, en yeni 500 ziyaret üzerinden `"Tüm geçmiş"` kapsamıyla) eklendi.
+- **Yenileme Senkronizasyonu:** [Visits.vue](file:///e:/Projeler/makeitiny/Frontend/app/components/links/Visits.vue) içindeki yenileme eylemi (`@refreshed`) ve sekme dönüşü, yönetici link özetini ve analiz grafiklerini birlikte günceller hale getirildi.
+
+---
+
+## 17. Yönetici Dışa Aktarma (CSV / JSON) ve Beyaz Makas Favicon
+- **Backend (`openapi/api.yaml`, `Backend/api`):**
+  - Filtreli tüm linkler (`GET /admin/links/export`), aramaya uyan tüm kullanıcılar (`GET /admin/users/export`) ve belirli bir kullanıcının tüm linkleri (`GET /admin/users/{id}/links/export`) için CSV (UTF-8 BOM + `csvSafe`) ve JSON dışa aktarma uç noktaları eklendi; `oapi-codegen` kodu ve handler rota/format testleri güncellendi.
+- **Frontend (`Frontend/app`, `Frontend/public`):**
+  - Yönetici linkler (`admin/links/index.vue`) ve kullanıcılar (`admin/users/index.vue`) sayfalarında arama kutusunun soluna indirme menüsü eklendi; kullanıcı detayı (`admin/users/[id].vue`) linkler bölümüne uyumlu `Dışa aktar` düğmesi konuldu.
+  - Tarayıcı sekme ikonu için beyaz makas SVG (`Frontend/public/favicon.svg`) oluşturuldu ve `Frontend/nuxt.config.ts` `<head>` içine eklendi.
+

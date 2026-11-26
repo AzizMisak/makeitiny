@@ -117,7 +117,11 @@ paths:
       operationId: logout
       tags: [Auth]
       summary: Oturumu sonlandır
+      description: >
+        Yetki istemez; süresi dolmuş erişim anahtarıyla da çıkış yapılabilsin diye. Gönderilen Bearer token (varsa)
+        kara listeye alınır ve HttpOnly refresh çerezi iptal edilir.
       security:
+        - {}
         - bearerAuth: []
       responses:
         '200':
@@ -126,12 +130,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
-        '401':
-          description: Yetkisiz erişim
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
 
   /auth/refresh:
     post:
@@ -190,6 +188,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Yetersiz yetki
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: Kullanıcı bulunamadı
           content:
@@ -223,6 +233,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+    patch:
+      operationId: updateCurrentUser
+      tags: [Auth]
+      summary: Oturumdaki kullanıcının adını değiştir
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCurrentUserRequest'
+      responses:
+        '200':
+          description: Güncellenmiş kullanıcı bilgileri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: Geçersiz ad
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     delete:
       operationId: deleteUser
       tags: [Auth]
@@ -234,6 +275,55 @@ paths:
           description: Hesap başarıyla silindi
         '401':
           description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Owner hesabı silinemez veya hesap askıya alınmış
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /auth/user/plan:
+    put:
+      operationId: changeCurrentUserPlan
+      tags: [Auth]
+      summary: Oturumdaki standart kullanıcının paketini değiştir
+      description: |
+        Ödeme entegrasyonu olmadığından paket süresiz atanır. Yeni paketin link sınırını aşan en eski
+        linkler askıya alınır (planGraceUntil); yönlendirmeye devam eder ve bu tarihte kalıcı olarak silinir.
+        Sınırı yeterli bir pakete geri dönülürse askı kalkar. Yönetici ve sahip hesapları paket seçemez.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePlanRequest'
+      responses:
+        '200':
+          description: Güncellenmiş kullanıcı bilgileri
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: Paket bulunamadı (plan_not_found) veya hesap pakete tabi değil (plan_not_applicable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Hesap askıya alınmış
           content:
             application/json:
               schema:
@@ -574,6 +664,89 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /links/export:
+    get:
+      operationId: exportLinks
+      tags: [Links]
+      summary: Kullanıcının bütün linklerini CSV ya da JSON olarak indir
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        '200':
+          description: >
+            Dosya ek olarak döner (Content-Disposition: attachment). CSV, Excel'in Türkçe karakterleri
+            doğru açması için UTF-8 BOM ile başlar ve virgülle ayrılır.
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LinkItem'
+        '400':
+          description: Geçersiz biçim (invalid_format)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /links/logs/{id}/export:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: exportLinkLogs
+      tags: [Links]
+      summary: Bir linkin ziyaret kayıtlarını CSV ya da JSON olarak indir
+      description: Paketin analiz süresi sınırı burada da geçerlidir; yönetici ve sahip tüm geçmişi alır. En fazla 100.000 kayıt.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        '200':
+          description: 'Dosya ek olarak döner (Content-Disposition: attachment).'
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LinkLogItem'
+        '400':
+          description: Geçersiz biçim (invalid_format)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /links/logs/{id}:
     parameters:
       - name: id
@@ -708,6 +881,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /admin/links/export:
+    get:
+      operationId: adminExportLinks
+      tags: [Admin]
+      summary: Filtreye uyan tüm linkleri CSV ya da JSON olarak indir (admin/owner)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ExportFormat'
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, active, inactive, blocked, anonymous]
+      responses:
+        '200':
+          description: 'Dosya ek olarak döner (Content-Disposition: attachment).'
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminLinkItem'
+        '400':
+          description: Geçersiz biçim veya durum filtresi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Yetersiz rol yetkisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
   /admin/links/{id}:
     parameters:
       - name: id
@@ -728,6 +952,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminLinkItem'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Yetersiz rol yetkisi
           content:
@@ -765,6 +995,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Yetersiz rol yetkisi
           content:
@@ -773,6 +1009,12 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '404':
           description: Link bulunamadı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Seçilen takma ad zaten kullanımda
           content:
             application/json:
               schema:
@@ -786,6 +1028,12 @@ paths:
       responses:
         '204':
           description: Link silindi
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Yetersiz rol yetkisi
           content:
@@ -837,6 +1085,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaginatedLogsResponse'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Yetersiz rol yetkisi
           content:
@@ -887,8 +1141,111 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminPaginatedUsersResponse'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Yetersiz rol yetkisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /admin/users/export:
+    get:
+      operationId: adminExportUsers
+      tags: [Admin]
+      summary: Arama filtresine uyan tüm kullanıcıları CSV ya da JSON olarak indir (admin/owner)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ExportFormat'
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 'Dosya ek olarak döner (Content-Disposition: attachment).'
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+        '400':
+          description: Geçersiz biçim (invalid_format)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Yetersiz rol yetkisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /admin/users/{id}/links/export:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: adminExportUserLinks
+      tags: [Admin]
+      summary: Belirli bir kullanıcının tüm linklerini CSV ya da JSON olarak indir (admin/owner)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ExportFormat'
+      responses:
+        '200':
+          description: 'Dosya ek olarak döner (Content-Disposition: attachment).'
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminLinkItem'
+        '400':
+          description: Geçersiz biçim (invalid_format)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Yetersiz rol yetkisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Kullanıcı bulunamadı
           content:
             application/json:
               schema:
@@ -914,6 +1271,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/User'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Yetersiz yetki
           content:
@@ -947,6 +1310,12 @@ paths:
                 $ref: '#/components/schemas/User'
         '400':
           description: Geçersiz istek
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
           content:
             application/json:
               schema:
@@ -996,6 +1365,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Yalnızca owner bu işlemi yapabilir
           content:
@@ -1037,7 +1412,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlanItem'
         '400':
-          description: Geçersiz istek
+          description: >
+            Geçersiz istek. Ad boşsa, fiyat negatifse, link hakkı -1'den küçükse ya da analiz süresi 1 günden azsa
+            invalid_plan_values döner; değerler sessizce yok sayılmaz.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Yetkisiz erişim
           content:
             application/json:
               schema:
@@ -1062,6 +1445,16 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: "Giriş veya kayıt sonrası alınan JWT token (Authorization: Bearer <token>)"
+
+  parameters:
+    ExportFormat:
+      name: format
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [csv, json]
+        default: csv
 
   schemas:
     ApiError:
@@ -1191,6 +1584,16 @@ components:
           type: string
           example: "2026-11-14"
 
+    ChangePlanRequest:
+      type: object
+      required:
+        - planId
+      properties:
+        planId:
+          type: integer
+          format: int32
+          example: 2
+
     RegisterRequest:
       type: object
       required:
@@ -1233,10 +1636,26 @@ components:
           type: string
           format: email
           example: aziz@makeitiny.com
+        currentPassword:
+          type: string
+          description: Kendi şifresini değiştiren kullanıcı için mevcut parola zorunludur (admin/owner başkasının şifresini sıfırlarken gerekmez).
+          example: EskiSifre123
         newPassword:
           type: string
           minLength: 4
           example: YeniGucluSifre123
+
+    UpdateCurrentUserRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 40
+          description: Baştaki ve sondaki boşluklar kırpılır.
+          example: Aziz
 
     AuthResponse:
       type: object
@@ -1331,6 +1750,10 @@ components:
         createdAt:
           type: string
           example: "2026-10-02"
+        planGraceUntil:
+          type: string
+          description: Doluysa link paket düşürüldüğü için askıdadır ve bu tarihte kalıcı olarak silinir.
+          example: "2027-01-25"
 
     CreateAnonymousLinkRequest:
       type: object
@@ -1470,7 +1893,9 @@ components:
           example: "TR"
         clickedAt:
           type: string
-          example: "2026-11-12 11:45:00"
+          format: date-time
+          description: UTC, RFC 3339 biçiminde. Arayüz yerel saate çevirir.
+          example: "2026-11-12T08:45:00Z"
 
     PaginatedLinksResponse:
       type: object
@@ -1762,6 +2187,7 @@ components:
         planId:
           type: integer
           format: int32
+          description: Yönetici ve sahip hesaplarına paket atanamaz (400 plan_not_applicable).
           example: 2
         planExpiresAt:
           type: string

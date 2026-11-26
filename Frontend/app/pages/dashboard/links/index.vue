@@ -4,6 +4,12 @@ useHead({ title: 'Linklerim | makeiTiny' })
 
 const { links, currentPage, pageSize, totalLinks, totalPages, loading, initialized, fetchLinks } = useLinks()
 const remove = useLinkRemoval()
+const { busy: exporting, exportLinks } = useExport()
+
+const exportMenu = computed(() => [
+  { label: 'CSV olarak indir', icon: 'download', disabled: !!exporting.value, onSelect: () => exportLinks('csv') },
+  { label: 'JSON olarak indir', icon: 'download', disabled: !!exporting.value, onSelect: () => exportLinks('json') }
+])
 
 const error = ref('')
 const firstLoad = computed(() => !initialized.value && !error.value)
@@ -24,6 +30,13 @@ onMounted(() => load())
   <div>
     <PanelHeader title="Linklerim">
       <p v-if="initialized" class="tnum text-ink-3">{{ formatNumber(totalLinks) }} link</p>
+      <UiMenu v-if="totalLinks > 0" label="Linkleri dışa aktar" :items="exportMenu">
+        <template #trigger="{ toggle, open }">
+          <UiButton variant="outline" size="sm" icon="download" :loading="!!exporting" loading-label="Hazırlanıyor" :aria-expanded="open" aria-haspopup="menu" @click="toggle">
+            Dışa aktar
+          </UiButton>
+        </template>
+      </UiMenu>
     </PanelHeader>
 
     <UiLoadError v-if="error" :message="error" :loading="loading" class="mb-6" @retry="load()" />

@@ -15,9 +15,6 @@ import type {
 export type AdminLinkStatusFilter = 'all' | 'active' | 'inactive' | 'blocked' | 'anonymous'
 
 export function useAdmin() {
-  const usersCache = useState<Record<string, User>>('mit_admin_users_cache', () => ({}))
-  const linksCache = useState<Record<string, AdminLinkItem>>('mit_admin_links_cache', () => ({}))
-
   async function fetchPlans(): Promise<PlanItem[]> {
     return await useApi().get<PlanItem[]>('/plans')
   }
@@ -40,34 +37,25 @@ export function useAdmin() {
     if (search.trim()) {
       params.set('search', search.trim())
     }
-    const res = await useApi().get<AdminPaginatedLinksResponse>(`/admin/links?${params.toString()}`)
-    for (const item of res.items) {
-      linksCache.value[item.id] = item
-    }
-    return res
+    return await useApi().get<AdminPaginatedLinksResponse>(`/admin/links?${params.toString()}`)
   }
 
+  /** Kayıt yoksa null döner; diğer hatalar (ağ, 500) çağırana iletilir. */
   async function fetchAdminLinkById(id: string): Promise<AdminLinkItem | null> {
     try {
-      const item = await useApi().get<AdminLinkItem>(`/admin/links/${id}`)
-      linksCache.value[item.id] = item
-      return item
-    } catch {
-      return linksCache.value[id] ?? null
+      return await useApi().get<AdminLinkItem>(`/admin/links/${id}`)
+    } catch (e: any) {
+      if (e?.code === 'link_not_found') return null
+      throw e
     }
   }
 
   async function adminUpdateLink(id: string, payload: AdminUpdateLinkPayload): Promise<LinkItem> {
-    const updated = await useApi().patch<LinkItem, AdminUpdateLinkPayload>(`/admin/links/${id}`, payload)
-    if (linksCache.value[id]) {
-      linksCache.value[id] = { ...linksCache.value[id]!, ...updated }
-    }
-    return updated
+    return await useApi().patch<LinkItem, AdminUpdateLinkPayload>(`/admin/links/${id}`, payload)
   }
 
   async function adminDeleteLink(id: string): Promise<void> {
     await useApi().del(`/admin/links/${id}`)
-    delete linksCache.value[id]
   }
 
   async function fetchAdminLinkLogs(id: string, page = 1, limit = 20): Promise<PaginatedLogsResponse> {
@@ -86,20 +74,16 @@ export function useAdmin() {
     if (search.trim()) {
       params.set('search', search.trim())
     }
-    const res = await useApi().get<AdminPaginatedUsersResponse>(`/admin/users?${params.toString()}`)
-    for (const u of res.items) {
-      usersCache.value[u.id] = u
-    }
-    return res
+    return await useApi().get<AdminPaginatedUsersResponse>(`/admin/users?${params.toString()}`)
   }
 
+  /** Kayıt yoksa null döner; diğer hatalar (ağ, 500) çağırana iletilir. */
   async function fetchAdminUserById(id: string): Promise<User | null> {
     try {
-      const u = await useApi().get<User>(`/admin/users/${id}`)
-      usersCache.value[u.id] = u
-      return u
-    } catch {
-      return usersCache.value[id] ?? null
+      return await useApi().get<User>(`/admin/users/${id}`)
+    } catch (e: any) {
+      if (e?.code === 'user_not_found') return null
+      throw e
     }
   }
 
@@ -109,18 +93,14 @@ export function useAdmin() {
   }
 
   async function adminUpdateUser(id: string, payload: AdminUpdateUserPayload): Promise<User> {
-    const updated = await useApi().patch<User, AdminUpdateUserPayload>(`/admin/users/${id}`, payload)
-    usersCache.value[id] = updated
-    return updated
+    return await useApi().patch<User, AdminUpdateUserPayload>(`/admin/users/${id}`, payload)
   }
 
   async function adminUpdateUserRole(
     id: string,
     role: Extract<RoleName, 'user' | 'admin'>
   ): Promise<User> {
-    const updated = await useApi().put<User, AdminUpdateRolePayload>(`/admin/user-role/${id}`, { role })
-    usersCache.value[id] = updated
-    return updated
+    return await useApi().put<User, AdminUpdateRolePayload>(`/admin/user-role/${id}`, { role })
   }
 
   async function adminUpdatePlan(id: number, payload: AdminUpdatePlanPayload): Promise<PlanItem> {

@@ -122,24 +122,36 @@ func HashRefreshToken(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func SetRefreshCookie(w http.ResponseWriter, rawToken string, maxAgeSeconds int) {
+func IsHTTPS(r *http.Request, publicBaseURL string) bool {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(publicBaseURL)), "https://") {
+		return true
+	}
+	if r == nil {
+		return false
+	}
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func SetRefreshCookie(w http.ResponseWriter, rawToken string, maxAgeSeconds int, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     RefreshCookieName,
 		Value:    rawToken,
 		Path:     "/",
 		MaxAge:   maxAgeSeconds,
 		HttpOnly: true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
 
-func ClearRefreshCookie(w http.ResponseWriter) {
+func ClearRefreshCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     RefreshCookieName,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }

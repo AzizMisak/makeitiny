@@ -15,7 +15,7 @@ watch([email, password], () => {
 
 async function submit() {
   errors.value = {
-    email: email.value.trim() ? undefined : 'E-postanı yaz.',
+    email: !email.value.trim() ? 'E-postanı yaz.' : /^\S+@\S+\.\S+$/.test(email.value.trim()) ? undefined : 'Geçerli bir e-posta yaz.',
     password: password.value ? undefined : 'Parolanı yaz.'
   }
   if (errors.value.email || errors.value.password) return

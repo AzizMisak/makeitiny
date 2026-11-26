@@ -93,7 +93,7 @@ SELECT
     l.wait_enabled,
     l.wait_seconds,
     l.title,
-    (l.is_active AND COALESCE(u.is_active, TRUE)) AS is_active,
+    (l.is_active AND COALESCE(u.is_active OR (u.banned_until IS NOT NULL AND u.banned_until <= NOW()), TRUE)) AS is_active,
     l.expires_at,
     l.max_clicks,
     l.ad_enabled,
@@ -159,13 +159,22 @@ func (q *Queries) GetLinkByAlias(ctx context.Context, alias string) (GetLinkByAl
 	return i, err
 }
 
-const incrementLinkClicks = `-- name: IncrementLinkClicks :exec
+const incrementLinkClicks = `-- name: IncrementLinkClicks :execrows
 UPDATE links
 SET clicks = clicks + 1
 WHERE alias = $1
+  AND (max_clicks IS NULL OR max_clicks <= 0 OR clicks + $2 < max_clicks)
 `
 
-func (q *Queries) IncrementLinkClicks(ctx context.Context, alias string) error {
-	_, err := q.db.Exec(ctx, incrementLinkClicks, alias)
-	return err
+type IncrementLinkClicksParams struct {
+	Alias  string `json:"alias"`
+	Clicks int64  `json:"clicks"`
+}
+
+func (q *Queries) IncrementLinkClicks(ctx context.Context, arg IncrementLinkClicksParams) (int64, error) {
+	result, err := q.db.Exec(ctx, incrementLinkClicks, arg.Alias, arg.Clicks)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

@@ -2,7 +2,23 @@
 import type { LinkLogItem, PaginatedLogsResponse } from '~/types/link'
 
 /** Ziyaret kayıtları tablosu. Kullanıcı ve yönetim panelinde aynı tablo, farklı kaynak. */
-const props = defineProps<{ fetchPage: (page: number, limit: number) => Promise<PaginatedLogsResponse>; windowLabel?: string }>()
+const props = defineProps<{
+  fetchPage: (page: number, limit: number) => Promise<PaginatedLogsResponse>
+  windowLabel?: string
+  /** Verilirse kayıtlar CSV / JSON olarak indirilebilir (kullanıcının kendi linki). */
+  exportFor?: { id: string; alias: string }
+}>()
+const emit = defineEmits<{ refreshed: [] }>()
+
+const { busy: exporting, exportVisits } = useExport()
+const exportMenu = computed(() =>
+  props.exportFor
+    ? [
+        { label: 'CSV olarak indir', icon: 'download', onSelect: () => exportVisits(props.exportFor!.id, props.exportFor!.alias, 'csv') },
+        { label: 'JSON olarak indir', icon: 'download', onSelect: () => exportVisits(props.exportFor!.id, props.exportFor!.alias, 'json') }
+      ]
+    : []
+)
 
 const PAGE_SIZE = 20
 const rows = ref<LinkLogItem[]>([])
@@ -35,6 +51,11 @@ function deviceIcon(type: string): string {
 }
 
 onMounted(() => load(1))
+
+function refresh() {
+  load()
+  emit('refreshed')
+}
 </script>
 
 <template>
@@ -43,7 +64,16 @@ onMounted(() => load(1))
       <p class="tnum text-sm text-ink-3">
         <template v-if="loadedOnce">{{ windowLabel ? `${windowLabel}, ` : '' }}{{ formatNumber(total) }} ziyaret</template>
       </p>
-      <UiIconButton icon="refresh" label="Kayıtları yenile" :loading="loading" @click="load()" />
+      <div class="flex items-center gap-1">
+        <UiMenu v-if="exportFor && total > 0" label="Ziyaretleri dışa aktar" :items="exportMenu">
+          <template #trigger="{ toggle, open }">
+            <UiButton variant="outline" size="sm" icon="download" :loading="!!exporting" loading-label="Hazırlanıyor" :aria-expanded="open" aria-haspopup="menu" @click="toggle">
+              Dışa aktar
+            </UiButton>
+          </template>
+        </UiMenu>
+        <UiIconButton icon="refresh" label="Kayıtları yenile" :loading="loading" @click="refresh" />
+      </div>
     </div>
 
     <UiLoadError v-if="error" :message="error" :loading="loading" @retry="load()" />

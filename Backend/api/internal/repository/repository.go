@@ -2,19 +2,22 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"log"
 	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
 	"makeitiny/api/internal/db"
 	"makeitiny/api/internal/qr"
 )
 
-const linkCacheTTL = 24 * time.Hour
+const (
+	linkCacheTTL        = 24 * time.Hour
+	clickDeltasProcsKey = "clicks:deltas:procs"
+)
 
 func linkCacheKey(alias string) string {
 	return "link:" + alias
@@ -22,13 +25,14 @@ func linkCacheKey(alias string) string {
 
 // UserRepository kullanıcı, rol, paket ve refresh token verisine erişim katmanı.
 type UserRepository struct {
+	pool    *pgxpool.Pool
 	q       *db.Queries
 	redis   *redis.Client
 	qrStore *qr.Store
 }
 
-func NewUserRepository(q *db.Queries, rdb *redis.Client, qrStore *qr.Store) *UserRepository {
-	return &UserRepository{q: q, redis: rdb, qrStore: qrStore}
+func NewUserRepository(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, qrStore *qr.Store) *UserRepository {
+	return &UserRepository{pool: pool, q: q, redis: rdb, qrStore: qrStore}
 }
 
 func (r *UserRepository) Create(ctx context.Context, publicID, name, email, passwordHash string) (db.User, error) {
@@ -48,6 +52,10 @@ func (r *UserRepository) Create(ctx context.Context, publicID, name, email, pass
 	})
 
 	return u, nil
+}
+
+func (r *UserRepository) UpdateName(ctx context.Context, userID int64, name string) (db.User, error) {
+	return r.q.UpdateUserName(ctx, db.UpdateUserNameParams{ID: userID, Name: name})
 }
 
 func (r *UserRepository) GetByEmail(ctx context.Context, email string) (db.User, error) {
@@ -74,13 +82,32 @@ func (r *UserRepository) GetRoles(ctx context.Context, userID int64) ([]string, 
 }
 
 func (r *UserRepository) SetRole(ctx context.Context, userID int64, roleName string) error {
-	if err := r.q.ClearUserNonOwnerRoles(ctx, userID); err != nil {
+	if r.pool == nil {
+		if err := r.q.ClearUserNonOwnerRoles(ctx, userID); err != nil {
+			return err
+		}
+		return r.q.AssignRoleByName(ctx, db.AssignRoleByNameParams{
+			UserID: userID,
+			Name:   roleName,
+		})
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
 		return err
 	}
-	return r.q.AssignRoleByName(ctx, db.AssignRoleByNameParams{
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	qtx := r.q.WithTx(tx)
+	if err := qtx.ClearUserNonOwnerRoles(ctx, userID); err != nil {
+		return err
+	}
+	if err := qtx.AssignRoleByName(ctx, db.AssignRoleByNameParams{
 		UserID: userID,
 		Name:   roleName,
-	})
+	}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *UserRepository) GetPlanByID(ctx context.Context, planID int32) (db.GetPlanByIDRow, error) {
@@ -99,6 +126,46 @@ func (r *UserRepository) CountLinks(ctx context.Context, userID int64) (int64, e
 	return r.q.CountLinksByUser(ctx, pgtype.Int8{Int64: userID, Valid: true})
 }
 
+// ChangePlan kullanıcının paketini değiştirir ve linklerinin askı durumunu yeni sınıra göre aynı işlemde
+// yeniden hesaplar. CreateWithQuota ile aynı danışma kilidi alınır; eşzamanlı link oluşturma araya giremez.
+// Askı yalnızca PostgreSQL'de tutulur (yönlendirmeyi etkilemez), bu yüzden Redis güncellenmez.
+func (r *UserRepository) ChangePlan(ctx context.Context, userID int64, planID, maxLinks int32, graceUntil time.Time) (db.User, error) {
+	apply := func(q *db.Queries) (db.User, error) {
+		user, err := q.UpdateUserPlan(ctx, db.UpdateUserPlanParams{ID: userID, PlanID: planID})
+		if err != nil {
+			return db.User{}, err
+		}
+		err = q.ApplyLinkPlanGrace(ctx, db.ApplyLinkPlanGraceParams{
+			UserID:     userID,
+			MaxLinks:   maxLinks,
+			GraceUntil: pgtype.Timestamptz{Time: graceUntil, Valid: true},
+		})
+		return user, err
+	}
+	if r.pool == nil {
+		return apply(r.q)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return db.User{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, userID); err != nil {
+		return db.User{}, err
+	}
+
+	user, err := apply(r.q.WithTx(tx))
+	if err != nil {
+		return db.User{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.User{}, err
+	}
+	return user, nil
+}
+
 func (r *UserRepository) UpdatePassword(ctx context.Context, email, passwordHash string) (int64, error) {
 	return r.q.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{
 		Email:        email,
@@ -106,17 +173,19 @@ func (r *UserRepository) UpdatePassword(ctx context.Context, email, passwordHash
 	})
 }
 
+// InvalidateUserLinksCache kullanıcının bütün link önbelleklerini siler; router bir sonraki ziyarette
+// sahibin güncel durumunu (ban dahil) PostgreSQL'den okur.
 func (r *UserRepository) InvalidateUserLinksCache(ctx context.Context, userID int64) {
 	if r.redis == nil {
 		return
 	}
-	links, err := r.q.ListLinksByUser(ctx, pgtype.Int8{Int64: userID, Valid: true})
+	links, err := r.q.ListLinkIDsByUser(ctx, pgtype.Int8{Int64: userID, Valid: true})
 	if err != nil || len(links) == 0 {
 		return
 	}
-	keys := make([]string, 0, len(links))
+	keys := make([]string, 0, len(links)*2)
 	for _, l := range links {
-		keys = append(keys, linkCacheKey(l.Alias))
+		keys = append(keys, linkCacheKey(l.Alias), "reach:"+l.Alias)
 	}
 	if err := r.redis.Del(ctx, keys...).Err(); err != nil {
 		log.Printf("redis kullanıcı linkleri önbellek temizleme uyarısı: %v", err)
@@ -126,17 +195,23 @@ func (r *UserRepository) InvalidateUserLinksCache(ctx context.Context, userID in
 // Delete önce kullanıcının linklerini tespit eder, PostgreSQL'den kullanıcıyı siler,
 // hemen ardından Redis üzerindeki link Hash kayıtlarını ve diskteki QR dosyalarını temizler.
 func (r *UserRepository) Delete(ctx context.Context, id int64) (int64, error) {
-	links, _ := r.q.ListLinksByUser(ctx, pgtype.Int8{Int64: id, Valid: true})
+	links, err := r.q.ListLinksByUser(ctx, pgtype.Int8{Int64: id, Valid: true})
+	if err != nil {
+		return 0, err
+	}
 
 	rows, err := r.q.DeleteUser(ctx, id)
 	if err != nil {
 		return 0, err
 	}
+	if rows == 0 {
+		return 0, nil
+	}
 
 	if r.redis != nil && len(links) > 0 {
-		keys := make([]string, 0, len(links))
+		keys := make([]string, 0, len(links)*2)
 		for _, l := range links {
-			keys = append(keys, linkCacheKey(l.Alias))
+			keys = append(keys, linkCacheKey(l.Alias), "reach:"+l.Alias)
 		}
 		if err := r.redis.Del(ctx, keys...).Err(); err != nil {
 			log.Printf("redis kullanıcı linkleri silme uyarısı: %v", err)
@@ -194,12 +269,21 @@ func (r *UserRepository) GetRefreshTokenByHash(ctx context.Context, tokenHash st
 	return r.q.GetRefreshTokenByHash(ctx, tokenHash)
 }
 
-func (r *UserRepository) RevokeRefreshTokenByHash(ctx context.Context, tokenHash string) error {
-	return r.q.RevokeRefreshTokenByHash(ctx, tokenHash)
+// RevokeActiveRefreshToken token henüz kullanılmamışsa tek sorguda iptal edip döner (atomik rotasyon).
+func (r *UserRepository) RevokeActiveRefreshToken(ctx context.Context, tokenHash string) (db.RefreshToken, error) {
+	return r.q.RevokeActiveRefreshToken(ctx, tokenHash)
 }
 
-func (r *UserRepository) RevokeAllUserRefreshTokens(ctx context.Context, userID int64) error {
-	return r.q.RevokeAllUserRefreshTokens(ctx, userID)
+// DeleteRefreshToken çıkışta token'ı siler. İptal işareti yalnızca rotasyon içindir; silinen token
+// sonradan gelirse "bilinmeyen token" sayılır ve tekrar kullanım (çalıntı) alarmı tetiklenmez.
+func (r *UserRepository) DeleteRefreshToken(ctx context.Context, tokenHash string) error {
+	return r.q.DeleteRefreshTokenByHash(ctx, tokenHash)
+}
+
+// DeleteAllRefreshTokens kullanıcının bütün oturum yenileme token'larını siler (parola değişimi, askı,
+// tekrar kullanım tespiti). Eski cihazlardan gelen token'lar sonradan yeni oturumu düşürmez.
+func (r *UserRepository) DeleteAllRefreshTokens(ctx context.Context, userID int64) error {
+	return r.q.DeleteUserRefreshTokens(ctx, userID)
 }
 
 func (r *UserRepository) BlacklistJTI(ctx context.Context, jti string, ttl time.Duration) {
@@ -242,13 +326,14 @@ func (r *UserRepository) GetUserRevokedBefore(ctx context.Context, userID int64)
 
 // LinkRepository link verisine erişim katmanı (PostgreSQL + Redis Hash).
 type LinkRepository struct {
+	pool    *pgxpool.Pool
 	q       *db.Queries
 	redis   *redis.Client
 	qrStore *qr.Store
 }
 
-func NewLinkRepository(q *db.Queries, rdb *redis.Client, qrStore *qr.Store) *LinkRepository {
-	return &LinkRepository{q: q, redis: rdb, qrStore: qrStore}
+func NewLinkRepository(pool *pgxpool.Pool, q *db.Queries, rdb *redis.Client, qrStore *qr.Store) *LinkRepository {
+	return &LinkRepository{pool: pool, q: q, redis: rdb, qrStore: qrStore}
 }
 
 // syncToRedis link verisini NoSQL dokümanı/tablosu gibi Redis Hash (HSET) olarak kaydeder.
@@ -325,39 +410,94 @@ func (r *LinkRepository) removeFromRedis(ctx context.Context, alias string) {
 	}
 }
 
-// GetPendingClickDelta henüz 30 sn worker ile DB'ye yazılmamış tıklama farkını Redis'ten okur.
-func (r *LinkRepository) GetPendingClickDelta(ctx context.Context, alias string) int64 {
-	if r.redis == nil || alias == "" {
-		return 0
-	}
-	val, err := r.redis.HGet(ctx, "clicks:deltas", alias).Int64()
-	if err != nil {
-		return 0
-	}
-	return val
+// ClickDeltaField router'ın clicks:deltas içindeki alan adı. Farklar link kimliğiyle tutulur;
+// takma ad değişse de tıklamalar doğru linke yazılır.
+func ClickDeltaField(linkID int64) string {
+	return "id:" + strconv.FormatInt(linkID, 10)
 }
 
-// GetPendingClickDeltas verilen alias listesi için Redis'teki bekleyen tıklama farklarını tek seferde (HMGET) okur.
-func (r *LinkRepository) GetPendingClickDeltas(ctx context.Context, aliases []string) map[string]int64 {
-	result := make(map[string]int64, len(aliases))
-	if r.redis == nil || len(aliases) == 0 {
-		return result
+// LinkRef bekleyen tıklama sorgusu için link kimliği ve (eski kayıtlar için) takma adı.
+type LinkRef struct {
+	ID    int64
+	Alias string
+}
+
+func (r *LinkRepository) clickDeltaKeys(ctx context.Context) []string {
+	keys := []string{"clicks:deltas"}
+	if r.redis == nil {
+		return keys
 	}
-	vals, err := r.redis.HMGet(ctx, "clicks:deltas", aliases...).Result()
+	procKeys, err := r.redis.SMembers(ctx, clickDeltasProcsKey).Result()
 	if err != nil {
+		return keys
+	}
+	for _, k := range procKeys {
+		if k != "" {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+// PendingClicks henüz worker ile PostgreSQL'e yazılmamış (ve aktarım sürecindeki) tıklama farklarını okur.
+// Eski sürümden kalan takma ad anahtarlı farklar da toplanır.
+func (r *LinkRepository) PendingClicks(ctx context.Context, refs []LinkRef) map[int64]int64 {
+	result := make(map[int64]int64, len(refs))
+	if r.redis == nil || len(refs) == 0 {
 		return result
 	}
-	for i, v := range vals {
-		if v == nil {
+	fields := make([]string, 0, len(refs)*2)
+	for _, ref := range refs {
+		fields = append(fields, ClickDeltaField(ref.ID), ref.Alias)
+	}
+	for _, key := range r.clickDeltaKeys(ctx) {
+		vals, err := r.redis.HMGet(ctx, key, fields...).Result()
+		if err != nil {
 			continue
 		}
-		if s, ok := v.(string); ok {
+		for i, v := range vals {
+			s, ok := v.(string)
+			if !ok {
+				continue
+			}
 			if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
-				result[aliases[i]] = n
+				result[refs[i/2].ID] += n
 			}
 		}
 	}
 	return result
+}
+
+// TotalPendingClicks platform genelinde henüz yazılmamış bütün tıklama farklarının toplamı.
+func (r *LinkRepository) TotalPendingClicks(ctx context.Context) int64 {
+	if r.redis == nil {
+		return 0
+	}
+	var total int64
+	for _, key := range r.clickDeltaKeys(ctx) {
+		vals, err := r.redis.HVals(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+		for _, v := range vals {
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+				total += n
+			}
+		}
+	}
+	return total
+}
+
+func (r *LinkRepository) ListIDsByUser(ctx context.Context, userID int64) ([]LinkRef, error) {
+	rows, err := r.q.ListLinkIDsByUser(ctx, pgtype.Int8{Int64: userID, Valid: true})
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]LinkRef, len(rows))
+	for i, row := range rows {
+		refs[i] = LinkRef{ID: row.ID, Alias: row.Alias}
+	}
+	return refs, nil
 }
 
 // CheckAndSetAnonRateLimit anonim link için IP başına 24 saatlik hız sınırını kontrol eder.
@@ -383,8 +523,11 @@ func (r *LinkRepository) CheckAndSetAnonRateLimit(ctx context.Context, ip string
 }
 
 func (r *LinkRepository) ReleaseAnonRateLimit(ctx context.Context, ip string) {
-	if r.redis == nil || ip == "" {
+	if r.redis == nil {
 		return
+	}
+	if ip == "" {
+		ip = "unknown"
 	}
 	_ = r.redis.Del(ctx, "anon:limit:"+ip).Err()
 }
@@ -398,6 +541,45 @@ func (r *LinkRepository) Create(ctx context.Context, params db.CreateLinkParams)
 
 	r.syncToRedis(ctx, link)
 	return link, nil
+}
+
+// CreateWithQuota aynı kullanıcının eşzamanlı isteklerinin paket link sınırını aşmaması için
+// işlem içi danışma kilidiyle kotayı denetleyip linki oluşturur.
+func (r *LinkRepository) CreateWithQuota(ctx context.Context, userID int64, maxLinks int32, params db.CreateLinkParams) (db.Link, bool, error) {
+	if r.pool == nil || maxLinks < 0 {
+		link, err := r.Create(ctx, params)
+		return link, err == nil, err
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return db.Link{}, false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, userID); err != nil {
+		return db.Link{}, false, err
+	}
+
+	qtx := r.q.WithTx(tx)
+	count, err := qtx.CountLinksByUser(ctx, pgtype.Int8{Int64: userID, Valid: true})
+	if err != nil {
+		return db.Link{}, false, err
+	}
+	if count >= int64(maxLinks) {
+		return db.Link{}, false, nil
+	}
+
+	link, err := qtx.CreateLink(ctx, params)
+	if err != nil {
+		return db.Link{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.Link{}, false, err
+	}
+
+	r.syncToRedis(ctx, link)
+	return link, true, nil
 }
 
 // CreateAnonymous önce PostgreSQL'e anonim linki kaydeder, hemen ardından Redis Hash'e yazar.
@@ -456,17 +638,17 @@ func (r *LinkRepository) AliasExists(ctx context.Context, alias string) (bool, e
 	return r.q.AliasExists(ctx, alias)
 }
 
-// Update önce PostgreSQL'de günceller, hemen ardından Redis Hash kaydını yeniler (alias değiştiyse eskiyi siler).
+// Update önce PostgreSQL'de günceller, hemen ardından Redis'teki link ve erişilebilirlik kayıtlarını siler.
+// Kayıt yeniden yazılmaz: router bir sonraki ziyarette sahibin ban durumunu ve bekleyen tıklamaları da
+// hesaba katarak PostgreSQL'den okur. Böylece eski tıklama sayısı ya da ban dışı bir durum önbelleğe yazılmaz.
 func (r *LinkRepository) Update(ctx context.Context, oldAlias string, params db.UpdateLinkParams) (db.Link, error) {
 	updated, err := r.q.UpdateLink(ctx, params)
 	if err != nil {
 		return db.Link{}, err
 	}
 
-	if oldAlias != "" && oldAlias != updated.Alias {
-		r.removeFromRedis(ctx, oldAlias)
-	}
-	r.syncToRedis(ctx, updated)
+	r.removeFromRedis(ctx, oldAlias)
+	r.removeFromRedis(ctx, updated.Alias)
 
 	return updated, nil
 }
@@ -544,10 +726,9 @@ func (r *LinkRepository) AdminUpdate(ctx context.Context, oldAlias string, param
 		return db.Link{}, err
 	}
 
-	if oldAlias != "" && oldAlias != updated.Alias {
-		r.removeFromRedis(ctx, oldAlias)
-	}
-	r.syncToRedis(ctx, updated)
+	// Kullanıcı güncellemesiyle aynı: önbellek silinir, router doğru durumu PostgreSQL'den okur.
+	r.removeFromRedis(ctx, oldAlias)
+	r.removeFromRedis(ctx, updated.Alias)
 
 	return updated, nil
 }
@@ -572,5 +753,3 @@ func (r *LinkRepository) AdminDelete(ctx context.Context, publicID string) (int6
 
 	return rows, nil
 }
-
-var ErrQRFileMissing = errors.New("QR dosyası bulunamadı")

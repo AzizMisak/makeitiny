@@ -49,139 +49,219 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
-// Redirect: Şifresiz ve bekletmesiz linklerde 302 Found + Cache-Control: no-store, no-cache ile hedef URL'e yönlendirir.
-// Şifreli linklerde kullanıcıyı Frontend üzerindeki /unlock/{link} ekranına yönlendirir.
-// Bekletme açık olan linklerde kullanıcıyı Frontend üzerindeki /w/{link} ekranına yönlendirir.
-// Kısa link bulunamadığında, pasife çekildiğinde, engellendiğinde, süresi/limiti dolduğunda veya hedef adrese ulaşılamadığında
-// Frontend üzerindeki /error/{link} hata sayfasına yönlendirir.
+// Redirect GET isteklerinde her durumda 302 döner. HEAD isteklerinde (önizleyici botlar, curl -I)
+// tıklama saymadan ve bekleme bileti üretmeden salt-okunur durum döner.
 func (h *Handler) Redirect(w http.ResponseWriter, r *http.Request, link string) {
-	meta := extractClickMeta(r)
-	target, err := h.redirects.Resolve(r.Context(), link, meta)
-	if err != nil {
-		escapedLink := url.PathEscape(link)
-		switch {
-		case errors.Is(err, service.ErrLinkLocked):
-			unlockURL := h.frontendURL + "/unlock/" + escapedLink
-			w.Header().Set("Cache-Control", "no-store, no-cache")
-			w.Header().Set("Location", unlockURL)
+	w.Header().Set("Cache-Control", "no-store, no-cache")
+
+	if r.Method == http.MethodHead {
+		rec, err := h.redirects.Preview(r.Context(), link)
+		if err != nil {
+			w.Header().Set("Location", h.frontendURL+"/error/"+url.PathEscape(link)+"?reason="+reasonFor(err))
 			w.WriteHeader(http.StatusFound)
-		case errors.Is(err, service.ErrLinkWaiting):
-			waitURL := h.frontendURL + "/w/" + escapedLink
-			w.Header().Set("Cache-Control", "no-store, no-cache")
-			w.Header().Set("Location", waitURL)
-			w.WriteHeader(http.StatusFound)
-		case errors.Is(err, service.ErrLinkDisabled):
-			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=disabled"
-			w.Header().Set("Cache-Control", "no-store, no-cache")
-			w.Header().Set("Location", errURL)
-			w.WriteHeader(http.StatusFound)
-		case errors.Is(err, service.ErrLinkBlocked):
-			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=blocked"
-			w.Header().Set("Cache-Control", "no-store, no-cache")
-			w.Header().Set("Location", errURL)
-			w.WriteHeader(http.StatusFound)
-		case errors.Is(err, service.ErrLinkExpired):
-			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=expired"
-			w.Header().Set("Cache-Control", "no-store, no-cache")
-			w.Header().Set("Location", errURL)
-			w.WriteHeader(http.StatusFound)
-		case errors.Is(err, service.ErrLinkLimitReached):
-			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=limit_reached"
-			w.Header().Set("Cache-Control", "no-store, no-cache")
-			w.Header().Set("Location", errURL)
-			w.WriteHeader(http.StatusFound)
-		case errors.Is(err, service.ErrLinkNotFound):
-			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=not_found"
-			w.Header().Set("Cache-Control", "no-store, no-cache")
-			w.Header().Set("Location", errURL)
-			w.WriteHeader(http.StatusFound)
-		case errors.Is(err, service.ErrTargetUnreachable):
-			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=unreachable"
-			w.Header().Set("Cache-Control", "no-store, no-cache")
-			w.Header().Set("Location", errURL)
-			w.WriteHeader(http.StatusFound)
-		default:
-			errURL := h.frontendURL + "/error/" + escapedLink + "?reason=internal"
-			w.Header().Set("Cache-Control", "no-store, no-cache")
-			w.Header().Set("Location", errURL)
-			w.WriteHeader(http.StatusFound)
+			return
 		}
+		if rec.PasswordHash != "" {
+			w.Header().Set("Location", h.frontendURL+"/unlock/"+url.PathEscape(link))
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	w.Header().Set("Cache-Control", "no-store, no-cache")
-	w.Header().Set("Location", target)
+	target, ticket, err := h.redirects.Resolve(r.Context(), link, extractClickMeta(r))
+
+	if err == nil {
+		w.Header().Set("Location", target)
+		w.WriteHeader(http.StatusFound)
+		return
+	}
+
+	escaped := url.PathEscape(link)
+	location := h.frontendURL + "/error/" + escaped + "?reason=" + reasonFor(err)
+	switch {
+	case errors.Is(err, service.ErrLinkLocked):
+		location = h.frontendURL + "/unlock/" + escaped
+		if origRef := strings.TrimSpace(r.Referer()); origRef != "" && !strings.HasPrefix(origRef, h.frontendURL+"/unlock/") {
+			if len(origRef) > 512 {
+				origRef = origRef[:512]
+			}
+			http.SetCookie(w, &http.Cookie{
+				Name:     "mit_unlock_ref",
+				Value:    url.QueryEscape(link + "|" + origRef),
+				Path:     "/r/",
+				MaxAge:   600,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+				Secure:   h.isSecureRequest(r),
+			})
+		}
+	case errors.Is(err, service.ErrLinkWaiting):
+		location = h.frontendURL + "/w/" + escaped + "?t=" + url.QueryEscape(ticket)
+	}
+	w.Header().Set("Location", location)
 	w.WriteHeader(http.StatusFound)
 }
 
+func (h *Handler) isSecureRequest(r *http.Request) bool {
+	return strings.HasPrefix(strings.ToLower(h.frontendURL), "https://") ||
+		r.TLS != nil ||
+		strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+// RootNotFound kısa kod içermeyen istekleri (GET /r/) hata ekranına gönderir.
+func (h *Handler) RootNotFound(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store, no-cache")
+	w.Header().Set("Location", h.frontendURL+"/error?reason=not_found")
+	w.WriteHeader(http.StatusFound)
+}
+
+// reasonFor hata ekranındaki ?reason= değerini üretir.
+func reasonFor(err error) string {
+	switch {
+	case errors.Is(err, service.ErrLinkBlocked):
+		return "blocked"
+	case errors.Is(err, service.ErrLinkDisabled):
+		return "disabled"
+	case errors.Is(err, service.ErrLinkExpired):
+		return "expired"
+	case errors.Is(err, service.ErrLinkLimitReached):
+		return "limit_reached"
+	case errors.Is(err, service.ErrLinkNotFound):
+		return "not_found"
+	case errors.Is(err, service.ErrTargetUnreachable):
+		return "unreachable"
+	default:
+		return "internal"
+	}
+}
+
+// writeServiceError servis hatalarını JSON uç noktaları için ortak HTTP durumlarına çevirir.
+func writeServiceError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, service.ErrInvalidPassword):
+		writeError(w, http.StatusUnauthorized, "invalid_password", "Girdiğiniz parola hatalı.")
+	case errors.Is(err, service.ErrTooManyRequests):
+		writeError(w, http.StatusTooManyRequests, "too_many_requests", err.Error())
+	case errors.Is(err, service.ErrLinkLocked):
+		writeError(w, http.StatusForbidden, "link_locked", err.Error())
+	case errors.Is(err, service.ErrLinkNotLocked):
+		writeError(w, http.StatusBadRequest, "link_not_locked", err.Error())
+	case errors.Is(err, service.ErrLinkBlocked):
+		writeError(w, http.StatusForbidden, "link_blocked", err.Error())
+	case errors.Is(err, service.ErrLinkDisabled):
+		writeError(w, http.StatusGone, "link_disabled", err.Error())
+	case errors.Is(err, service.ErrLinkExpired):
+		writeError(w, http.StatusGone, "link_expired", err.Error())
+	case errors.Is(err, service.ErrLinkLimitReached):
+		writeError(w, http.StatusGone, "link_limit_reached", err.Error())
+	case errors.Is(err, service.ErrTicketInvalid):
+		writeError(w, http.StatusGone, "ticket_invalid", err.Error())
+	case errors.Is(err, service.ErrWaitNotFinished):
+		writeError(w, http.StatusTooEarly, "wait_not_finished", err.Error())
+	case errors.Is(err, service.ErrLinkNotFound):
+		writeError(w, http.StatusNotFound, "link_not_found", "Aradığınız kısa link bulunamadı.")
+	case errors.Is(err, service.ErrTargetUnreachable):
+		writeError(w, http.StatusBadGateway, "target_unreachable", "Bu kısa linkin yönlendirdiği hedef adrese şu anda ulaşılamıyor.")
+	default:
+		writeError(w, http.StatusInternalServerError, "internal_error", fallback)
+	}
+}
+
 func (h *Handler) Unlock(w http.ResponseWriter, r *http.Request, link string) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 	var req gen.UnlockLinkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Password) == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Lütfen geçerli bir parola giriniz.")
 		return
 	}
 
-	target, err := h.redirects.Unlock(r.Context(), link, req.Password, extractClickMeta(r))
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrInvalidPassword):
-			writeError(w, http.StatusUnauthorized, "invalid_password", "Girdiğiniz parola hatalı.")
-		case errors.Is(err, service.ErrLinkDisabled):
-			writeError(w, http.StatusGone, "link_disabled", err.Error())
-		case errors.Is(err, service.ErrLinkBlocked):
-			writeError(w, http.StatusForbidden, "link_blocked", err.Error())
-		case errors.Is(err, service.ErrLinkExpired):
-			writeError(w, http.StatusGone, "link_expired", err.Error())
-		case errors.Is(err, service.ErrLinkLimitReached):
-			writeError(w, http.StatusGone, "link_limit_reached", err.Error())
-		case errors.Is(err, service.ErrLinkNotFound):
-			writeError(w, http.StatusNotFound, "link_not_found", "Aradığınız kısa link bulunamadı.")
-		case errors.Is(err, service.ErrTargetUnreachable):
-			writeError(w, http.StatusBadGateway, "target_unreachable", "Bu kısa linkin yönlendirdiği hedef adrese şu anda ulaşılamıyor.")
-		default:
-			writeError(w, http.StatusInternalServerError, "internal_error", "Kilit açma işlemi sırasında bir hata oluştu.")
+	meta := extractClickMeta(r)
+	restoredRef := false
+	if c, err := r.Cookie("mit_unlock_ref"); err == nil && c.Value != "" {
+		if raw, err := url.QueryUnescape(c.Value); err == nil {
+			if cookieLink, origRef, ok := strings.Cut(raw, "|"); ok && cookieLink == link && strings.TrimSpace(origRef) != "" {
+				meta.Referer = origRef
+				restoredRef = true
+				http.SetCookie(w, &http.Cookie{
+					Name:     "mit_unlock_ref",
+					Value:    "",
+					Path:     "/r/",
+					MaxAge:   -1,
+					HttpOnly: true,
+					SameSite: http.SameSiteLaxMode,
+					Secure:   h.isSecureRequest(r),
+				})
+			}
 		}
+	}
+	if !restoredRef && strings.HasPrefix(meta.Referer, h.frontendURL+"/unlock/") {
+		meta.Referer = "Doğrudan"
+	}
+
+	target, err := h.redirects.Unlock(r.Context(), link, req.Password, meta)
+	if err != nil {
+		writeServiceError(w, err, "Kilit açma işlemi sırasında bir hata oluştu.")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, gen.UnlockLinkResponse{
-		Target: target,
-	})
+	writeJSON(w, http.StatusOK, gen.TargetResponse{Target: target})
 }
 
 func (h *Handler) Preview(w http.ResponseWriter, r *http.Request, link string) {
 	rec, err := h.redirects.Preview(r.Context(), link)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrLinkDisabled):
-			writeError(w, http.StatusGone, "link_disabled", err.Error())
-		case errors.Is(err, service.ErrLinkBlocked):
-			writeError(w, http.StatusForbidden, "link_blocked", err.Error())
-		case errors.Is(err, service.ErrLinkExpired):
-			writeError(w, http.StatusGone, "link_expired", err.Error())
-		case errors.Is(err, service.ErrLinkLimitReached):
-			writeError(w, http.StatusGone, "link_limit_reached", err.Error())
-		case errors.Is(err, service.ErrLinkNotFound):
-			writeError(w, http.StatusNotFound, "link_not_found", "Aradığınız kısa link bulunamadı.")
-		default:
-			writeError(w, http.StatusInternalServerError, "internal_error", "Önizleme bilgisi alınamadı.")
-		}
+		writeServiceError(w, err, "Önizleme bilgisi alınamadı.")
 		return
-	}
-
-	locked := rec.PasswordHash != ""
-	target := rec.TargetURL
-	if locked {
-		target = ""
 	}
 
 	writeJSON(w, http.StatusOK, gen.LinkPreview{
 		Alias:       rec.Alias,
-		Target:      target,
-		Locked:      locked,
+		Locked:      rec.PasswordHash != "",
 		WaitEnabled: rec.WaitEnabled,
 		WaitSeconds: rec.WaitSeconds,
+		AdEnabled:   rec.AdEnabled,
 	})
+}
+
+func (h *Handler) WaitInfo(w http.ResponseWriter, r *http.Request, link string, params gen.WaitInfoParams) {
+	if strings.TrimSpace(params.T) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Bekleme bileti eksik.")
+		return
+	}
+
+	state, err := h.redirects.WaitInfo(r.Context(), link, params.T)
+	if err != nil {
+		writeServiceError(w, err, "Bekleme bilgisi alınamadı.")
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, gen.WaitInfo{
+		Alias:            state.Alias,
+		WaitSeconds:      state.WaitSeconds,
+		RemainingSeconds: state.RemainingSeconds,
+		AdEnabled:        state.AdEnabled,
+	})
+}
+
+func (h *Handler) ContinueWait(w http.ResponseWriter, r *http.Request, link string) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	var req gen.ContinueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Ticket) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Bekleme bileti eksik.")
+		return
+	}
+
+	target, err := h.redirects.Continue(r.Context(), link, req.Ticket)
+	if err != nil {
+		writeServiceError(w, err, "Hedef adres alınamadı.")
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, gen.TargetResponse{Target: target})
 }
 
 var langToCountryMap = map[string]string{
@@ -299,7 +379,7 @@ func parseUserAgent(ua string) (deviceType, browser, osName string) {
 	switch {
 	case strings.Contains(lower, "android"):
 		osName = "Android"
-	case strings.Contains(lower, "iphone") || strings.Contains(lower, "ipad") || strings.Contains(lower, "ios"):
+	case strings.Contains(lower, "iphone") || strings.Contains(lower, "ipad") || strings.Contains(lower, "ipod") || strings.Contains(lower, "cpu os"):
 		osName = "iOS"
 	case strings.Contains(lower, "windows"):
 		osName = "Windows"

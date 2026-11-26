@@ -9,6 +9,13 @@ export function roleMeta(roles?: RoleName[]): { primary: RoleName; label: string
   return { primary: 'user', label: 'Kullanıcı', tone: 'neutral' }
 }
 
+/** Yönetici ve sahip hesapları paketlere tabi değildir (backend aynı kuralı uygular). */
+export function isPrivileged(roles?: RoleName[]): boolean {
+  return !!roles?.some((r) => r === 'admin' || r === 'owner')
+}
+
+export const PRIVILEGED_PLAN_NOTE = 'Yönetici ve sahip hesapları paketlere tabi değil: link sınırı yok, bütün özellikler açık, analiz geçmişi tam.'
+
 export interface SecurityOption {
   value: SecurityStatus
   label: string

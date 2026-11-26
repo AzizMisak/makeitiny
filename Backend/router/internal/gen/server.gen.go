@@ -6,6 +6,7 @@
 package gen
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -21,18 +22,22 @@ type ApiError struct {
 	Message string `json:"message"`
 }
 
+// ContinueRequest defines model for ContinueRequest.
+type ContinueRequest struct {
+	// Ticket Example: 8xQz2v0n1qL3c9aYwJ5mTt7rKp4dEe6s
+	Ticket string `json:"ticket"`
+}
+
 // LinkPreview defines model for LinkPreview.
 type LinkPreview struct {
+	// AdEnabled Example: false
+	AdEnabled bool `json:"adEnabled"`
+
 	// Alias Example: kampanya-yaz
 	Alias string `json:"alias"`
 
 	// Locked Example: false
 	Locked bool `json:"locked"`
-
-	// Target Link şifreliyse güvenlik için boş döner.
-	//
-	// Example: https://magaza.example.com/kampanyalar/yaz-indirimi
-	Target string `json:"target"`
 
 	// WaitEnabled Example: false
 	WaitEnabled bool `json:"waitEnabled"`
@@ -41,17 +46,43 @@ type LinkPreview struct {
 	WaitSeconds int32 `json:"waitSeconds"`
 }
 
+// TargetResponse defines model for TargetResponse.
+type TargetResponse struct {
+	// Target Example: https://magaza.example.com/kampanyalar/yaz-indirimi
+	Target string `json:"target"`
+}
+
 // UnlockLinkRequest defines model for UnlockLinkRequest.
 type UnlockLinkRequest struct {
 	// Password Example: gizli123
 	Password string `json:"password"`
 }
 
-// UnlockLinkResponse defines model for UnlockLinkResponse.
-type UnlockLinkResponse struct {
-	// Target Example: https://magaza.example.com/kampanyalar/yaz-indirimi
-	Target string `json:"target"`
+// WaitInfo defines model for WaitInfo.
+type WaitInfo struct {
+	// AdEnabled Example: true
+	AdEnabled bool `json:"adEnabled"`
+
+	// Alias Example: kampanya-yaz
+	Alias string `json:"alias"`
+
+	// RemainingSeconds Biletin açılmasına kalan saniye (0 ise /continue çağrılabilir)
+	//
+	// Example: 3
+	RemainingSeconds int32 `json:"remainingSeconds"`
+
+	// WaitSeconds Example: 5
+	WaitSeconds int32 `json:"waitSeconds"`
 }
+
+// WaitInfoParams defines parameters for WaitInfo.
+type WaitInfoParams struct {
+	// T Yönlendirmede verilen tek kullanımlık bilet
+	T string `form:"t" json:"t"`
+}
+
+// ContinueWaitJSONRequestBody defines body for ContinueWait for application/json ContentType.
+type ContinueWaitJSONRequestBody = ContinueRequest
 
 // UnlockJSONRequestBody defines body for Unlock for application/json ContentType.
 type UnlockJSONRequestBody = UnlockLinkRequest
@@ -64,12 +95,18 @@ type ServerInterface interface {
 	// Redirect Kısaltılmış linki hedef adrese yönlendir
 	// (GET /{link})
 	Redirect(w http.ResponseWriter, r *http.Request, link string)
-	// Preview Kısa linkin nereye götürdüğünü önizle
+	// ContinueWait Bekleme süresi dolunca bileti kullanıp hedef adresi al
+	// (POST /{link}/continue)
+	ContinueWait(w http.ResponseWriter, r *http.Request, link string)
+	// Preview Kısa linkin erişim türünü öğren (hedef adres dönmez)
 	// (GET /{link}/preview)
 	Preview(w http.ResponseWriter, r *http.Request, link string)
-	// Unlock Şifreli linkin kilidini aç ve hedef adresi döndür / yönlendir
+	// Unlock Şifreli linkin parolasını doğrula ve hedef adresi döndür
 	// (POST /{link}/unlock)
 	Unlock(w http.ResponseWriter, r *http.Request, link string)
+	// WaitInfo Bekleme biletinin durumunu getir
+	// (GET /{link}/wait)
+	WaitInfo(w http.ResponseWriter, r *http.Request, link string, params WaitInfoParams)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -112,6 +149,32 @@ func (siw *ServerInterfaceWrapper) Redirect(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Redirect(w, r, link)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ContinueWait operation middleware
+func (siw *ServerInterfaceWrapper) ContinueWait(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "link" -------------
+	var link string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "link", r.PathValue("link"), &link, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "link", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ContinueWait(w, r, link)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -164,6 +227,48 @@ func (siw *ServerInterfaceWrapper) Unlock(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Unlock(w, r, link)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// WaitInfo operation middleware
+func (siw *ServerInterfaceWrapper) WaitInfo(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "link" -------------
+	var link string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "link", r.PathValue("link"), &link, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "link", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params WaitInfoParams
+
+	// ------------- Required query parameter "t" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "t", r.URL.Query(), &params.T, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "t"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "t", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.WaitInfo(w, r, link, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -297,6 +402,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/{link}", wrapper.Redirect)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/{link}/unlock", wrapper.Unlock)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/{link}/preview", wrapper.Preview)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/{link}/wait", wrapper.WaitInfo)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/{link}/continue", wrapper.ContinueWait)
 
 	return m
 }

@@ -20,6 +20,7 @@ const error = ref('')
 const created = ref<AnonymousLinkResponse | null>(null)
 const everCopied = ref(false)
 const qrReady = ref(false)
+const qrFailed = ref(false)
 
 const ttlOptions = [
   { value: 6, label: '6 saat' },
@@ -86,6 +87,7 @@ async function submit() {
     })
     everCopied.value = false
     qrReady.value = false
+    qrFailed.value = false
   } catch (e: any) {
     error.value = e?.message ?? 'Link oluşturulamadı. Tekrar dene.'
   } finally {
@@ -138,8 +140,9 @@ const expiry = computed(() => (created.value ? formatDateTimeTr(created.value.ex
 
         <div v-if="created.hasQr" class="flex items-end gap-4 md:flex-col md:items-stretch">
           <div class="relative flex h-40 w-40 items-center justify-center bg-white p-3">
-            <img v-show="qrReady" :src="`${config.apiBase}/links/${created.id}/qr`" alt="Kısa linkin QR kodu" class="h-full w-full" @load="qrReady = true" />
-            <UiSpinner v-if="!qrReady" :size="22" class="absolute text-[#0c5c47]" />
+            <img v-show="qrReady" :src="`${config.apiBase}/links/${created.id}/qr`" alt="Kısa linkin QR kodu" class="h-full w-full" @load="qrReady = true" @error="qrFailed = true" />
+            <UiSpinner v-if="!qrReady && !qrFailed" :size="22" class="absolute text-[#0c5c47]" />
+            <span v-if="qrFailed" class="px-2 text-center text-xs text-[#5a6d64]">QR yüklenemedi</span>
           </div>
           <UiButton variant="mat" size="sm" icon="download" :href="`${config.apiBase}/links/${created.id}/qr?download=1`">QR indir</UiButton>
         </div>

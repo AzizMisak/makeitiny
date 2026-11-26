@@ -8,6 +8,7 @@ const PAGE_SIZE = 10
 const TEAM_PAGES = 10
 
 const { fetchAdminUsers, adminUpdateUserRole } = useAdmin()
+const { isSelf } = useAuth()
 const { ask } = useConfirm()
 const toast = useToast()
 
@@ -98,7 +99,9 @@ onMounted(() => {
           <li v-for="u in team" :key="u.id" class="flex flex-wrap items-center gap-3 px-4 py-3.5">
             <AdminAvatar :name="u.name" :email="u.email" />
             <div class="min-w-0 flex-1">
-              <NuxtLink :to="`/dashboard/admin/users/${u.id}`" class="block truncate font-semibold hover:text-brand">{{ u.name || 'İsimsiz' }}</NuxtLink>
+              <NuxtLink :to="`/dashboard/admin/users/${u.id}`" class="block truncate font-semibold hover:text-brand">
+                {{ u.name || 'İsimsiz' }}<UiTag v-if="isSelf(u.id)" tone="mark" class="ml-2">Sen</UiTag>
+              </NuxtLink>
               <p class="truncate text-sm text-ink-3">{{ u.email }}</p>
             </div>
             <UiTag v-if="u.roles.includes('owner')" tone="mark" icon="key">Sahip</UiTag>

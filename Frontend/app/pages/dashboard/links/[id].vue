@@ -67,6 +67,13 @@ async function load() {
 
 onMounted(load)
 
+watch(tab, (next) => {
+  if (next === 'analiz' && link.value) {
+    getLink(id.value).then((fresh) => (link.value = fresh)).catch(() => {})
+    loadAnalysis()
+  }
+})
+
 useHead({ title: () => `${link.value?.alias ?? 'Link'} | makeiTiny` })
 
 const url = computed(() => (link.value ? full(link.value.alias) : ''))
@@ -157,6 +164,7 @@ const tabs = computed(() => [
           v-else-if="tab === 'ziyaretler'"
           :fetch-page="(p: number, l: number) => getLinkLogs(id, p, l)"
           :window-label="windowLabel"
+          :export-for="{ id, alias: link.alias }"
         />
         <LinksQr v-else-if="tab === 'qr'" v-model="link" />
         <!-- Sekme değişince taslak kaybolmasın diye form gizlenir, kaldırılmaz. -->

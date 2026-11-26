@@ -12,7 +12,7 @@ useHead({ title: () => `${info.value.title} | makeiTiny` })
 onMounted(async () => {
   if (!alias.value) return
   await navigateTo(
-    { path: `/error/${alias.value}`, query: route.query.reason ? { reason: String(route.query.reason) } : undefined },
+    { path: `/error/${encodeURIComponent(alias.value)}`, query: route.query.reason ? { reason: String(route.query.reason) } : undefined },
     { replace: true }
   )
 })

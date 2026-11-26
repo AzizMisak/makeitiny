@@ -13,7 +13,7 @@ const maxLinks = computed(() => (isAdmin.value ? -1 : (user.value?.plan?.maxLink
 const topMax = computed(() => Math.max(1, ...topLinks.value.map((l) => l.clicks)))
 
 const quotaText = computed(() => {
-  if (isAdmin.value) return 'Yönetici hesabı, link sınırı yok.'
+  if (isAdmin.value) return 'Pakete tabi değilsin: link sınırı yok, bütün özellikler açık.'
   if (maxLinks.value < 0) return 'Paketinde link sınırı yok.'
   const left = remainingLinks.value ?? 0
   return left > 0 ? `${formatNumber(left)} link hakkın kaldı.` : 'Link hakkın doldu.'
@@ -51,9 +51,9 @@ onMounted(load)
 
       <div>
         <div class="flex items-baseline justify-between gap-4">
-          <h2 class="font-semibold">{{ user?.plan?.name ?? 'Paketim' }}</h2>
+          <h2 class="font-semibold">{{ isAdmin ? `${roleMeta(user?.roles).label} hesabı` : (user?.plan?.name ?? 'Paketim') }}</h2>
           <NuxtLink to="/dashboard/subscription" class="text-sm font-medium text-brand-ink underline-offset-4 hover:underline">
-            Paket ayrıntısı
+            {{ isAdmin ? 'Paketler' : 'Paket ayrıntısı' }}
           </NuxtLink>
         </div>
         <p class="tnum mt-1 text-ink-2">

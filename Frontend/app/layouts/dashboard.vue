@@ -12,7 +12,7 @@ watch(() => route.fullPath, remember, { immediate: true })
     </div>
     <div class="min-w-0">
       <PanelMobileBar />
-      <main class="mx-auto w-full max-w-5xl px-5 pb-32 pt-8 md:px-10 lg:pb-20 lg:pt-12">
+      <main class="mx-auto w-full max-w-5xl px-5 pb-36 pt-8 md:px-10 lg:pb-20 lg:pt-12">
         <slot />
       </main>
     </div>

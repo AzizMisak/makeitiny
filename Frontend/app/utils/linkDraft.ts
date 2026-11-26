@@ -112,7 +112,8 @@ export function toUpdatePayload(d: LinkDraft, original: LinkItem, can: { alias: 
     isActive: d.isActive,
     expiresAt: d.expires ? d.expiresAt : '',
     maxClicks: d.limited ? Number(d.maxClicks) : 0,
-    adEnabled: can.ads ? d.adEnabled : original.adEnabled
+    // Paket reklama izin vermiyorsa yalnızca kapatma gönderilir; açık kalan reklam tekrar gönderilip reddedilmez.
+    adEnabled: can.ads ? d.adEnabled : original.adEnabled && !d.adEnabled ? false : undefined
   }
 }
 

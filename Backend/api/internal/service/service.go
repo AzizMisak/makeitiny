@@ -6,11 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/netip"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -28,14 +32,20 @@ var (
 	ErrUserNotFound       = errors.New("kullanıcı bulunamadı")
 	ErrUserSuspended      = errors.New("hesabınız askıya alınmıştır")
 	ErrForbidden          = errors.New("bu işlem için yetkiniz bulunmuyor")
-	ErrInvalidEmail       = errors.New("geçerli bir e-posta adresi giriniz")
-	ErrPasswordTooShort   = errors.New("parola en az 4 karakter olmalıdır")
-	ErrInvalidInput       = errors.New("geçersiz istek verisi")
+	ErrInvalidEmail           = errors.New("geçerli bir e-posta adresi giriniz")
+	ErrPasswordTooShort       = errors.New("parola en az 4 karakter olmalıdır")
+	ErrInvalidCurrentPassword = errors.New("mevcut parolanız hatalı")
+	ErrInvalidInput           = errors.New("geçersiz istek verisi")
 	ErrPlanNotFound       = errors.New("üyelik paketi bulunamadı")
 	ErrInvalidToken       = errors.New("geçersiz veya süresi dolmuş oturum")
+	ErrInvalidName        = errors.New("ad 2 ile 40 karakter arasında olmalıdır")
+	ErrInvalidPlanValues  = errors.New("paket değerleri geçersiz: ad boş olamaz, fiyat 0 veya üstü, link hakkı -1 (sınırsız) veya üstü, analiz süresi en az 1 gün olmalıdır")
+	ErrBlankPassword      = errors.New("link parolası yalnızca boşluktan oluşamaz")
+	ErrPlanNotApplicable  = errors.New("yönetici ve sahip hesaplarına paket atanamaz; bu hesaplar paket sınırlarına tabi değildir")
 
 	ErrAliasTaken                = errors.New("seçilen takma ad (alias) zaten kullanımda")
 	ErrInvalidAlias              = errors.New("takma ad 3-32 karakter olmalı ve yalnızca harf, rakam, tire (-) veya alt çizgi (_) içermelidir")
+	ErrInternalTargetURL         = errors.New("iç ağ, yerel ya da ayrılmış adreslere kısa link oluşturulamaz")
 	ErrInvalidTargetURL          = errors.New("geçerli bir hedef web adresi giriniz (örn. ornek.com)")
 	ErrInvalidWaitSeconds        = errors.New("bekletme açıkken bekleme süresi en az 1 saniye olmalıdır")
 	ErrLinkNotFound              = errors.New("link bulunamadı")
@@ -53,6 +63,7 @@ const (
 	defaultAliasLen    = 6
 	defaultPublicIDLen = 16
 	maxAliasCollision  = 5
+	maxWaitSeconds     = 300
 )
 
 var aliasRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,32}$`)
@@ -269,17 +280,26 @@ func (s *AuthService) Register(ctx context.Context, name *string, email, passwor
 	if !strings.Contains(normalizedEmail, "@") {
 		return "", "", UserProfile{}, ErrInvalidEmail
 	}
-	if len(password) < 4 {
+	if utf8.RuneCountInString(password) < 4 {
 		return "", "", UserProfile{}, ErrPasswordTooShort
 	}
 
 	userName := ""
 	if name != nil && strings.TrimSpace(*name) != "" {
-		userName = strings.TrimSpace(*name)
+		clean := strings.Join(strings.Fields(*name), " ")
+		if n := utf8.RuneCountInString(clean); n < 2 || n > 40 {
+			return "", "", UserProfile{}, ErrInvalidName
+		}
+		userName = clean
 	} else {
 		parts := strings.Split(normalizedEmail, "@")
-		userName = parts[0]
-		if userName == "" {
+		prefix := strings.Join(strings.Fields(parts[0]), " ")
+		runes := []rune(prefix)
+		if len(runes) > 40 {
+			runes = runes[:40]
+		}
+		userName = string(runes)
+		if utf8.RuneCountInString(userName) < 2 {
 			userName = "kullanici"
 		}
 	}
@@ -331,6 +351,20 @@ func (s *AuthService) Register(ctx context.Context, name *string, email, passwor
 	return accessToken, refreshToken, profile, nil
 }
 
+var (
+	dummyHashOnce sync.Once
+	dummyHashVal  string
+)
+
+func getDummyPasswordHash() string {
+	dummyHashOnce.Do(func() {
+		if h, err := auth.HashPassword("makeitiny-dummy-timing-guard"); err == nil {
+			dummyHashVal = h
+		}
+	})
+	return dummyHashVal
+}
+
 func (s *AuthService) Login(ctx context.Context, email, password, userAgent, ip string) (string, string, UserProfile, error) {
 	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
 	if normalizedEmail == "" || password == "" {
@@ -340,6 +374,9 @@ func (s *AuthService) Login(ctx context.Context, email, password, userAgent, ip 
 	user, err := s.users.GetByEmail(ctx, normalizedEmail)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			if dh := getDummyPasswordHash(); dh != "" {
+				_, _ = auth.VerifyPassword(password, dh)
+			}
 			return "", "", UserProfile{}, ErrInvalidCredentials
 		}
 		return "", "", UserProfile{}, err
@@ -375,15 +412,17 @@ func (s *AuthService) RefreshSession(ctx context.Context, rawRefreshToken, userA
 	}
 
 	hash := auth.HashRefreshToken(rawRefreshToken)
-	rt, err := s.users.GetRefreshTokenByHash(ctx, hash)
-	if err != nil {
-		return "", "", UserProfile{}, ErrInvalidToken
-	}
 
-	if rt.RevokedAt.Valid {
-		// Token replay detection: daha önce kullanılmış token tekrar gönderildi -> tüm oturumları iptal et!
-		_ = s.users.RevokeAllUserRefreshTokens(ctx, rt.UserID)
-		s.users.RevokeUserTokensBefore(ctx, rt.UserID)
+	// Token tek sorguda "kullanılmadıysa ve süresi dolmadıysa iptal et ve getir" ile tüketilir;
+	// aynı token'la gelen iki eşzamanlı istekten yalnızca biri geçer. Süresi dolmuş eski token'lar
+	// replay saldırısı sayılmaz; yalnızca süresi hâlâ geçerli olup daha önce kullanılmış token tüm oturumları kapatır.
+	rt, err := s.users.RevokeActiveRefreshToken(ctx, hash)
+	if err != nil {
+		if old, lookupErr := s.users.GetRefreshTokenByHash(ctx, hash); lookupErr == nil && old.RevokedAt.Valid && old.ExpiresAt.Valid && time.Now().Before(old.ExpiresAt.Time) {
+			// Token replay detection: daha önce kullanılmış token tekrar gönderildi -> tüm oturumları iptal et!
+			_ = s.users.DeleteAllRefreshTokens(ctx, old.UserID)
+			s.users.RevokeUserTokensBefore(ctx, old.UserID)
+		}
 		return "", "", UserProfile{}, ErrInvalidToken
 	}
 
@@ -400,8 +439,6 @@ func (s *AuthService) RefreshSession(ctx context.Context, rawRefreshToken, userA
 	if err != nil {
 		return "", "", UserProfile{}, err
 	}
-
-	_ = s.users.RevokeRefreshTokenByHash(ctx, hash)
 
 	profile, err := s.BuildUserProfile(ctx, user)
 	if err != nil {
@@ -427,20 +464,20 @@ func (s *AuthService) Logout(ctx context.Context, tokenStr, rawRefreshToken stri
 		s.users.BlacklistJTI(ctx, claims.ID, ttl)
 	}
 	if strings.TrimSpace(rawRefreshToken) != "" {
-		_ = s.users.RevokeRefreshTokenByHash(ctx, auth.HashRefreshToken(rawRefreshToken))
+		_ = s.users.DeleteRefreshToken(ctx, auth.HashRefreshToken(rawRefreshToken))
 	}
 }
 
-func (s *AuthService) ResetPassword(ctx context.Context, actor UserProfile, email, newPassword string) error {
+func (s *AuthService) ResetPassword(ctx context.Context, actor UserProfile, email, currentPassword, newPassword string) error {
 	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
 	if !strings.Contains(normalizedEmail, "@") {
 		return ErrInvalidEmail
 	}
-	if len(newPassword) < 4 {
+	if utf8.RuneCountInString(newPassword) < 4 {
 		return ErrPasswordTooShort
 	}
 
-	if actor.User.Email != normalizedEmail && !IsPrivileged(actor.Roles) {
+	if !strings.EqualFold(actor.User.Email, normalizedEmail) && !IsPrivileged(actor.Roles) {
 		return ErrForbidden
 	}
 
@@ -450,6 +487,23 @@ func (s *AuthService) ResetPassword(ctx context.Context, actor UserProfile, emai
 			return ErrUserNotFound
 		}
 		return err
+	}
+
+	// Kendi parolasını değiştiren herkes mevcut parolasını doğrulamalı; başkasının parolası:
+	// sahip herkesinkini, yönetici yalnızca standart kullanıcınınkini değiştirebilir.
+	if targetUser.ID == actor.User.ID {
+		if currentPassword == "" {
+			return ErrInvalidCurrentPassword
+		}
+		ok, verifyErr := auth.VerifyPassword(currentPassword, targetUser.PasswordHash)
+		if verifyErr != nil || !ok {
+			return ErrInvalidCurrentPassword
+		}
+	} else {
+		targetRoles, roleErr := s.users.GetRoles(ctx, targetUser.ID)
+		if roleErr != nil || !CanResetOthersPassword(actor.Roles, targetRoles) {
+			return ErrForbidden
+		}
 	}
 
 	hash, err := auth.HashPassword(newPassword)
@@ -465,13 +519,33 @@ func (s *AuthService) ResetPassword(ctx context.Context, actor UserProfile, emai
 		return ErrUserNotFound
 	}
 
-	_ = s.users.RevokeAllUserRefreshTokens(ctx, targetUser.ID)
+	_ = s.users.DeleteAllRefreshTokens(ctx, targetUser.ID)
 	s.users.RevokeUserTokensBefore(ctx, targetUser.ID)
 	return nil
 }
 
+// UpdateName oturumdaki kullanıcının görünen adını değiştirir.
+func (s *AuthService) UpdateName(ctx context.Context, actor UserProfile, name string) (UserProfile, error) {
+	clean := strings.Join(strings.Fields(name), " ")
+	if n := utf8.RuneCountInString(clean); n < 2 || n > 40 {
+		return UserProfile{}, ErrInvalidName
+	}
+
+	updated, err := s.users.UpdateName(ctx, actor.User.ID, clean)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return UserProfile{}, ErrUserNotFound
+		}
+		return UserProfile{}, err
+	}
+	return s.BuildUserProfile(ctx, updated)
+}
+
 func (s *AuthService) DeleteUser(ctx context.Context, userID int64) error {
-	roles, _ := s.users.GetRoles(ctx, userID)
+	roles, err := s.users.GetRoles(ctx, userID)
+	if err != nil {
+		return err
+	}
 	if HasAnyRole(roles, "owner") {
 		return ErrForbidden
 	}
@@ -496,6 +570,27 @@ func (s *AuthService) ListPlans(ctx context.Context) ([]PlanInfo, error) {
 		out = append(out, planFromRow(p.ID, p.Slug, p.Name, p.PriceMonthly, p.MaxLinks, p.AllowCustomAlias, p.AllowPassword, p.AllowQr, p.AllowAds, p.AnalyticsDays))
 	}
 	return out, nil
+}
+
+// PlanGracePeriod paket düşürülünce sınırı aşan linklerin silinmeden önce bekletildiği süredir.
+const PlanGracePeriod = 60 * 24 * time.Hour
+
+// ChangeOwnPlan standart kullanıcının kendi paketini değiştirir (ödeme entegrasyonu yok, paket süresizdir).
+// Yeni paketin sınırını aşan en eski linkler PlanGracePeriod sonunda silinmek üzere askıya alınır;
+// sınırı yeterli bir pakete dönülürse askı kalkar.
+func (s *AuthService) ChangeOwnPlan(ctx context.Context, profile UserProfile, planID int32) (UserProfile, error) {
+	if IsPrivileged(profile.Roles) {
+		return UserProfile{}, ErrPlanNotApplicable
+	}
+	plan, err := s.users.GetPlanByID(ctx, planID)
+	if err != nil {
+		return UserProfile{}, ErrPlanNotFound
+	}
+	updated, err := s.users.ChangePlan(ctx, profile.User.ID, plan.ID, plan.MaxLinks, time.Now().Add(PlanGracePeriod))
+	if err != nil {
+		return UserProfile{}, err
+	}
+	return s.BuildUserProfile(ctx, updated)
 }
 
 // --- Admin User & Plan Management ---
@@ -566,6 +661,16 @@ func (s *AuthService) AdminListUsers(ctx context.Context, page, limit *int32, se
 		return PaginatedUsersResult{}, err
 	}
 
+	return PaginatedUsersResult{
+		Items:      s.buildAdminUserProfiles(ctx, users),
+		Page:       p,
+		Limit:      l,
+		Total:      total,
+		TotalPages: totalPages,
+	}, nil
+}
+
+func (s *AuthService) buildAdminUserProfiles(ctx context.Context, users []db.User) []UserProfile {
 	plansList, _ := s.ListPlans(ctx)
 	planMap := make(map[int32]PlanInfo, len(plansList))
 	for _, pl := range plansList {
@@ -594,14 +699,7 @@ func (s *AuthService) AdminListUsers(ctx context.Context, page, limit *int32, se
 			LinkCount: linkCount,
 		})
 	}
-
-	return PaginatedUsersResult{
-		Items:      profiles,
-		Page:       p,
-		Limit:      l,
-		Total:      total,
-		TotalPages: totalPages,
-	}, nil
+	return profiles
 }
 
 func parseOptionalTimestamp(raw *string, existing pgtype.Timestamptz) (pgtype.Timestamptz, error) {
@@ -638,7 +736,10 @@ func (s *AuthService) AdminUpdateUser(
 		return UserProfile{}, err
 	}
 
-	targetRoles, _ := s.users.GetRoles(ctx, targetUser.ID)
+	targetRoles, err := s.users.GetRoles(ctx, targetUser.ID)
+	if err != nil {
+		return UserProfile{}, err
+	}
 
 	if HasAnyRole(targetRoles, "owner") {
 		if isActive != nil && !*isActive {
@@ -649,6 +750,11 @@ func (s *AuthService) AdminUpdateUser(
 		}
 	} else if HasAnyRole(targetRoles, "admin") && !HasAnyRole(actor.Roles, "owner") {
 		return UserProfile{}, ErrForbidden
+	}
+
+	// Yönetici ve sahip hesapları paket sınırlarından muaftır; paket atanmaz.
+	if IsPrivileged(targetRoles) && (planID != nil || planExpiresAt != nil) {
+		return UserProfile{}, ErrPlanNotApplicable
 	}
 
 	newIsActive := targetUser.IsActive
@@ -680,14 +786,20 @@ func (s *AuthService) AdminUpdateUser(
 	}
 
 	newPlanID := targetUser.PlanID
+	existingExpires := targetUser.PlanExpiresAt
 	if planID != nil {
 		if _, err := s.users.GetPlanByID(ctx, *planID); err != nil {
 			return UserProfile{}, ErrPlanNotFound
 		}
 		newPlanID = *planID
+		if planExpiresAt == nil {
+			if *planID == 1 || (existingExpires.Valid && time.Now().After(existingExpires.Time)) {
+				existingExpires = pgtype.Timestamptz{Valid: false}
+			}
+		}
 	}
 
-	newExpiresAt, err := parseOptionalTimestamp(planExpiresAt, targetUser.PlanExpiresAt)
+	newExpiresAt, err := parseOptionalTimestamp(planExpiresAt, existingExpires)
 	if err != nil {
 		return UserProfile{}, err
 	}
@@ -706,7 +818,7 @@ func (s *AuthService) AdminUpdateUser(
 	}
 
 	if !newIsActive {
-		_ = s.users.RevokeAllUserRefreshTokens(ctx, updated.ID)
+		_ = s.users.DeleteAllRefreshTokens(ctx, updated.ID)
 		s.users.RevokeUserTokensBefore(ctx, updated.ID)
 	}
 
@@ -728,7 +840,10 @@ func (s *AuthService) AdminUpdateUserRole(ctx context.Context, actor UserProfile
 		return UserProfile{}, err
 	}
 
-	targetRoles, _ := s.users.GetRoles(ctx, targetUser.ID)
+	targetRoles, err := s.users.GetRoles(ctx, targetUser.ID)
+	if err != nil {
+		return UserProfile{}, err
+	}
 	if HasAnyRole(targetRoles, "owner") {
 		return UserProfile{}, ErrForbidden
 	}
@@ -761,6 +876,10 @@ func (s *AuthService) AdminUpdatePlan(ctx context.Context, actor UserProfile, pl
 		if errors.Is(err, pgx.ErrNoRows) {
 			return PlanInfo{}, ErrPlanNotFound
 		}
+		return PlanInfo{}, err
+	}
+
+	if err := ValidatePlanInput(in); err != nil {
 		return PlanInfo{}, err
 	}
 
@@ -835,21 +954,30 @@ func (s *LinkService) PublicBaseURL() string {
 	return s.publicBaseURL
 }
 
-func validateTargetURL(raw string) (string, error) {
+func validateTargetURL(raw, publicBaseURL string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "", ErrInvalidTargetURL
 	}
 	lower := strings.ToLower(trimmed)
-	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+	hasScheme := strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+	if !hasScheme {
 		trimmed = "https://" + trimmed
 	}
 	u, err := url.ParseRequestURI(trimmed)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Hostname() == "" || strings.ContainsAny(trimmed, " \t\r\n") {
 		return "", ErrInvalidTargetURL
 	}
-	if !strings.Contains(u.Host, ".") && !strings.HasPrefix(u.Host, "localhost") {
-		return "", ErrInvalidTargetURL
+	if !hasScheme {
+		h := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+		if !strings.Contains(h, ".") && h != "localhost" && u.Port() == "" && !isNumericHost(h) {
+			if _, err := netip.ParseAddr(strings.Trim(h, "[]")); err != nil {
+				return "", ErrInvalidTargetURL
+			}
+		}
+	}
+	if IsInternalHost(u.Hostname()) || IsSelfRedirect(u, publicBaseURL) {
+		return "", ErrInternalTargetURL
 	}
 	return trimmed, nil
 }
@@ -895,24 +1023,24 @@ func (s *LinkService) generateUniqueAlias(ctx context.Context) (string, error) {
 	return "", errors.New("benzersiz kısa kod üretilemedi")
 }
 
+// pendingFor tek bir linkin henüz PostgreSQL'e yazılmamış tıklama farkını döner.
+func (s *LinkService) pendingFor(ctx context.Context, id int64, alias string) int64 {
+	return s.links.PendingClicks(ctx, []repository.LinkRef{{ID: id, Alias: alias}})[id]
+}
+
 func (s *LinkService) overlayPendingClicks(ctx context.Context, items []db.Link) []db.Link {
 	if len(items) == 0 {
 		return items
 	}
-	aliases := make([]string, len(items))
+	refs := make([]repository.LinkRef, len(items))
 	for i, l := range items {
-		aliases[i] = l.Alias
+		refs[i] = repository.LinkRef{ID: l.ID, Alias: l.Alias}
 	}
-	deltas := s.links.GetPendingClickDeltas(ctx, aliases)
-	if len(deltas) == 0 {
-		return items
-	}
+	deltas := s.links.PendingClicks(ctx, refs)
 	out := make([]db.Link, len(items))
 	copy(out, items)
 	for i := range out {
-		if d, ok := deltas[out[i].Alias]; ok {
-			out[i].Clicks += d
-		}
+		out[i].Clicks += deltas[out[i].ID]
 	}
 	return out
 }
@@ -930,13 +1058,16 @@ type CreateLinkInput struct {
 }
 
 func (s *LinkService) CreateLink(ctx context.Context, profile UserProfile, in CreateLinkInput) (db.Link, error) {
+	if err := checkLinkPassword(in.Password); err != nil {
+		return db.Link{}, err
+	}
 	privileged := IsPrivileged(profile.Roles)
 
 	if !privileged && profile.Plan.MaxLinks >= 0 && profile.LinkCount >= int64(profile.Plan.MaxLinks) {
 		return db.Link{}, ErrPlanLinkLimitReached
 	}
 
-	cleanTarget, err := validateTargetURL(in.Target)
+	cleanTarget, err := validateTargetURL(in.Target, s.publicBaseURL)
 	if err != nil {
 		return db.Link{}, err
 	}
@@ -989,7 +1120,7 @@ func (s *LinkService) CreateLink(ctx context.Context, profile UserProfile, in Cr
 	var finalWaitSeconds int32
 	if !pwHash.Valid && in.WaitEnabled != nil && *in.WaitEnabled {
 		finalWaitEnabled = true
-		if in.WaitSeconds == nil || *in.WaitSeconds <= 0 {
+		if in.WaitSeconds == nil || *in.WaitSeconds <= 0 || *in.WaitSeconds > maxWaitSeconds {
 			return db.Link{}, ErrInvalidWaitSeconds
 		}
 		finalWaitSeconds = *in.WaitSeconds
@@ -1015,7 +1146,7 @@ func (s *LinkService) CreateLink(ctx context.Context, profile UserProfile, in Cr
 		return db.Link{}, err
 	}
 
-	link, err := s.links.Create(ctx, db.CreateLinkParams{
+	createParams := db.CreateLinkParams{
 		PublicID:     publicID,
 		UserID:       pgtype.Int8{Int64: profile.User.ID, Valid: true},
 		Alias:        finalAlias,
@@ -1028,7 +1159,18 @@ func (s *LinkService) CreateLink(ctx context.Context, profile UserProfile, in Cr
 		ExpiresAt:    expiresAt,
 		MaxClicks:    maxClicks,
 		AdEnabled:    finalAdEnabled,
-	})
+	}
+
+	var link db.Link
+	if !privileged && profile.Plan.MaxLinks >= 0 {
+		var allowed bool
+		link, allowed, err = s.links.CreateWithQuota(ctx, profile.User.ID, profile.Plan.MaxLinks, createParams)
+		if err == nil && !allowed {
+			return db.Link{}, ErrPlanLinkLimitReached
+		}
+	} else {
+		link, err = s.links.Create(ctx, createParams)
+	}
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -1050,7 +1192,10 @@ type CreateAnonymousLinkInput struct {
 }
 
 func (s *LinkService) CreateAnonymousLink(ctx context.Context, in CreateAnonymousLinkInput) (db.Link, error) {
-	cleanTarget, err := validateTargetURL(in.Target)
+	if err := checkLinkPassword(in.Password); err != nil {
+		return db.Link{}, err
+	}
+	cleanTarget, err := validateTargetURL(in.Target, s.publicBaseURL)
 	if err != nil {
 		return db.Link{}, err
 	}
@@ -1092,7 +1237,7 @@ func (s *LinkService) CreateAnonymousLink(ctx context.Context, in CreateAnonymou
 	var finalWaitSeconds int32
 	if !pwHash.Valid && in.WaitEnabled != nil && *in.WaitEnabled {
 		finalWaitEnabled = true
-		if in.WaitSeconds == nil || *in.WaitSeconds <= 0 {
+		if in.WaitSeconds == nil || *in.WaitSeconds <= 0 || *in.WaitSeconds > 30 {
 			s.links.ReleaseAnonRateLimit(ctx, in.ClientIP)
 			return db.Link{}, ErrInvalidWaitSeconds
 		}
@@ -1203,23 +1348,23 @@ func (s *LinkService) ListLinks(ctx context.Context, userID int64, page, limit *
 		return PaginatedLinksResult{}, err
 	}
 
-	topLinks, err := s.links.ListTopByUser(ctx, userID, 3)
+	// Bekleyen tıklamalar sıralamayı değiştirebileceği için birkaç aday alınıp yeniden sıralanır.
+	topCandidates, err := s.links.ListTopByUser(ctx, userID, 10)
 	if err != nil {
 		return PaginatedLinksResult{}, err
 	}
 
 	items = s.overlayPendingClicks(ctx, items)
-	topLinks = s.overlayPendingClicks(ctx, topLinks)
+	topLinks := s.overlayPendingClicks(ctx, topCandidates)
+	sort.SliceStable(topLinks, func(i, j int) bool { return topLinks[i].Clicks > topLinks[j].Clicks })
+	if len(topLinks) > 3 {
+		topLinks = topLinks[:3]
+	}
 
-	// Kullanıcının bekleyen tıklamalarının toplamını istatistiklere yansıt
-	allUserLinks, err := s.links.ListByUser(ctx, userID)
+	// Kullanıcının bekleyen tıklamalarının toplamı (yalnızca kimlik ve takma ad okunur, tam tarama yok)
 	extraClicks := int64(0)
-	if err == nil && len(allUserLinks) > 0 {
-		aliases := make([]string, len(allUserLinks))
-		for i, item := range allUserLinks {
-			aliases[i] = item.Alias
-		}
-		for _, d := range s.links.GetPendingClickDeltas(ctx, aliases) {
+	if refs, err := s.links.ListIDsByUser(ctx, userID); err == nil && len(refs) > 0 {
+		for _, d := range s.links.PendingClicks(ctx, refs) {
 			extraClicks += d
 		}
 	}
@@ -1260,7 +1405,7 @@ func (s *LinkService) GetLink(ctx context.Context, idStr string, userID int64) (
 		}
 		return db.Link{}, err
 	}
-	link.Clicks += s.links.GetPendingClickDelta(ctx, link.Alias)
+	link.Clicks += s.pendingFor(ctx, link.ID, link.Alias)
 	return link, nil
 }
 
@@ -1279,6 +1424,9 @@ type UpdateLinkInput struct {
 }
 
 func (s *LinkService) UpdateLink(ctx context.Context, profile UserProfile, idStr string, in UpdateLinkInput) (db.Link, error) {
+	if err := checkLinkPassword(in.Password); err != nil {
+		return db.Link{}, err
+	}
 	publicID := strings.TrimSpace(idStr)
 	if publicID == "" {
 		return db.Link{}, ErrLinkNotFound
@@ -1295,8 +1443,8 @@ func (s *LinkService) UpdateLink(ctx context.Context, profile UserProfile, idStr
 	privileged := IsPrivileged(profile.Roles)
 
 	newTarget := existing.TargetUrl
-	if in.Target != nil && strings.TrimSpace(*in.Target) != "" {
-		cleanTarget, err := validateTargetURL(*in.Target)
+	if in.Target != nil {
+		cleanTarget, err := validateTargetURL(*in.Target, s.publicBaseURL)
 		if err != nil {
 			return db.Link{}, err
 		}
@@ -1304,7 +1452,7 @@ func (s *LinkService) UpdateLink(ctx context.Context, profile UserProfile, idStr
 	}
 
 	newAlias := existing.Alias
-	if in.Alias != nil && strings.TrimSpace(*in.Alias) != "" {
+	if in.Alias != nil {
 		validAlias, err := validateAlias(*in.Alias)
 		if err != nil {
 			return db.Link{}, err
@@ -1355,7 +1503,7 @@ func (s *LinkService) UpdateLink(ctx context.Context, profile UserProfile, idStr
 		newWaitSeconds = 0
 	} else if !newWaitEnabled {
 		newWaitSeconds = 0
-	} else if newWaitSeconds <= 0 {
+	} else if newWaitSeconds <= 0 || newWaitSeconds > maxWaitSeconds {
 		return db.Link{}, ErrInvalidWaitSeconds
 	}
 
@@ -1366,6 +1514,9 @@ func (s *LinkService) UpdateLink(ctx context.Context, profile UserProfile, idStr
 
 	newIsActive := existing.IsActive
 	if in.IsActive != nil {
+		if *in.IsActive && (existing.SecurityStatus == "blocked" || existing.SecurityStatus == "malicious") {
+			return db.Link{}, ErrForbidden
+		}
 		newIsActive = *in.IsActive
 	}
 
@@ -1385,7 +1536,7 @@ func (s *LinkService) UpdateLink(ctx context.Context, profile UserProfile, idStr
 
 	newAdEnabled := existing.AdEnabled
 	if in.AdEnabled != nil {
-		if *in.AdEnabled && !privileged && !profile.Plan.AllowAds {
+		if *in.AdEnabled && !existing.AdEnabled && !privileged && !profile.Plan.AllowAds {
 			return db.Link{}, ErrPlanAdsRestricted
 		}
 		newAdEnabled = *in.AdEnabled
@@ -1419,7 +1570,7 @@ func (s *LinkService) UpdateLink(ctx context.Context, profile UserProfile, idStr
 		_, _ = s.qrStore.Generate(updated.PublicID, shortURL)
 	}
 
-	updated.Clicks += s.links.GetPendingClickDelta(ctx, updated.Alias)
+	updated.Clicks += s.pendingFor(ctx, updated.ID, updated.Alias)
 	return updated, nil
 }
 
@@ -1529,7 +1680,7 @@ func (s *LinkService) GenerateLinkQR(ctx context.Context, profile UserProfile, i
 	if err != nil {
 		return db.Link{}, err
 	}
-	updated.Clicks += s.links.GetPendingClickDelta(ctx, updated.Alias)
+	updated.Clicks += s.pendingFor(ctx, updated.ID, updated.Alias)
 	return updated, nil
 }
 
@@ -1602,7 +1753,12 @@ type PaginatedAdminLinksResult struct {
 }
 
 func (s *LinkService) AdminGetStats(ctx context.Context) (db.GetPlatformStatsRow, error) {
-	return s.links.GetPlatformStats(ctx)
+	stats, err := s.links.GetPlatformStats(ctx)
+	if err != nil {
+		return stats, err
+	}
+	stats.TotalClicks += s.links.TotalPendingClicks(ctx)
+	return stats, nil
 }
 
 func (s *LinkService) AdminGetLink(ctx context.Context, idStr string) (db.GetAdminLinkByPublicIDRow, error) {
@@ -1617,8 +1773,21 @@ func (s *LinkService) AdminGetLink(ctx context.Context, idStr string) (db.GetAdm
 		}
 		return db.GetAdminLinkByPublicIDRow{}, err
 	}
-	row.Clicks += s.links.GetPendingClickDelta(ctx, row.Alias)
+	row.Clicks += s.pendingFor(ctx, row.ID, row.Alias)
 	return row, nil
+}
+
+func normalizeAdminLinkStatus(status *string) (string, error) {
+	st := "all"
+	if status != nil && strings.TrimSpace(*status) != "" {
+		st = strings.ToLower(strings.TrimSpace(*status))
+	}
+	switch st {
+	case "all", "active", "inactive", "blocked", "anonymous":
+		return st, nil
+	default:
+		return "", ErrInvalidInput
+	}
 }
 
 func (s *LinkService) AdminListLinks(ctx context.Context, page, limit *int32, search, status *string) (PaginatedAdminLinksResult, error) {
@@ -1628,9 +1797,9 @@ func (s *LinkService) AdminListLinks(ctx context.Context, page, limit *int32, se
 	if search != nil {
 		q = strings.TrimSpace(*search)
 	}
-	st := "all"
-	if status != nil && strings.TrimSpace(*status) != "" {
-		st = strings.TrimSpace(*status)
+	st, err := normalizeAdminLinkStatus(status)
+	if err != nil {
+		return PaginatedAdminLinksResult{}, err
 	}
 
 	total, err := s.links.CountAdminLinks(ctx, q, st)
@@ -1650,15 +1819,13 @@ func (s *LinkService) AdminListLinks(ctx context.Context, page, limit *int32, se
 	}
 
 	if len(items) > 0 {
-		aliases := make([]string, len(items))
+		refs := make([]repository.LinkRef, len(items))
 		for i, item := range items {
-			aliases[i] = item.Alias
+			refs[i] = repository.LinkRef{ID: item.ID, Alias: item.Alias}
 		}
-		deltas := s.links.GetPendingClickDeltas(ctx, aliases)
+		deltas := s.links.PendingClicks(ctx, refs)
 		for i := range items {
-			if d, ok := deltas[items[i].Alias]; ok {
-				items[i].Clicks += d
-			}
+			items[i].Clicks += deltas[items[i].ID]
 		}
 	}
 
@@ -1672,6 +1839,9 @@ func (s *LinkService) AdminListLinks(ctx context.Context, page, limit *int32, se
 }
 
 func (s *LinkService) AdminUpdateLink(ctx context.Context, idStr string, in UpdateLinkInput) (db.Link, error) {
+	if err := checkLinkPassword(in.Password); err != nil {
+		return db.Link{}, err
+	}
 	publicID := strings.TrimSpace(idStr)
 	if publicID == "" {
 		return db.Link{}, ErrLinkNotFound
@@ -1686,8 +1856,8 @@ func (s *LinkService) AdminUpdateLink(ctx context.Context, idStr string, in Upda
 	}
 
 	newTarget := existing.TargetUrl
-	if in.Target != nil && strings.TrimSpace(*in.Target) != "" {
-		cleanTarget, err := validateTargetURL(*in.Target)
+	if in.Target != nil {
+		cleanTarget, err := validateTargetURL(*in.Target, s.publicBaseURL)
 		if err != nil {
 			return db.Link{}, err
 		}
@@ -1695,7 +1865,7 @@ func (s *LinkService) AdminUpdateLink(ctx context.Context, idStr string, in Upda
 	}
 
 	newAlias := existing.Alias
-	if in.Alias != nil && strings.TrimSpace(*in.Alias) != "" {
+	if in.Alias != nil {
 		validAlias, err := validateAlias(*in.Alias)
 		if err != nil {
 			return db.Link{}, err
@@ -1740,7 +1910,7 @@ func (s *LinkService) AdminUpdateLink(ctx context.Context, idStr string, in Upda
 		newWaitSeconds = 0
 	} else if !newWaitEnabled {
 		newWaitSeconds = 0
-	} else if newWaitSeconds <= 0 {
+	} else if newWaitSeconds <= 0 || newWaitSeconds > maxWaitSeconds {
 		return db.Link{}, ErrInvalidWaitSeconds
 	}
 
@@ -1749,8 +1919,26 @@ func (s *LinkService) AdminUpdateLink(ctx context.Context, idStr string, in Upda
 		newTitle = strings.TrimSpace(*in.Title)
 	}
 
+	newSecStatus := existing.SecurityStatus
+	newSecCheckedAt := existing.SecurityCheckedAt
+	if in.SecurityStatus != nil && strings.TrimSpace(*in.SecurityStatus) != "" {
+		st := strings.ToLower(strings.TrimSpace(*in.SecurityStatus))
+		switch st {
+		case "unchecked", "safe", "suspicious", "malicious", "blocked":
+			newSecStatus = st
+			newSecCheckedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+		default:
+			return db.Link{}, ErrInvalidInput
+		}
+	}
+
 	newIsActive := existing.IsActive
-	if in.IsActive != nil {
+	if newSecStatus == "blocked" || newSecStatus == "malicious" {
+		if in.IsActive != nil && *in.IsActive {
+			return db.Link{}, ErrForbidden
+		}
+		newIsActive = false
+	} else if in.IsActive != nil {
 		newIsActive = *in.IsActive
 	}
 
@@ -1771,22 +1959,6 @@ func (s *LinkService) AdminUpdateLink(ctx context.Context, idStr string, in Upda
 	newAdEnabled := existing.AdEnabled
 	if in.AdEnabled != nil {
 		newAdEnabled = *in.AdEnabled
-	}
-
-	newSecStatus := existing.SecurityStatus
-	newSecCheckedAt := existing.SecurityCheckedAt
-	if in.SecurityStatus != nil && strings.TrimSpace(*in.SecurityStatus) != "" {
-		st := strings.ToLower(strings.TrimSpace(*in.SecurityStatus))
-		switch st {
-		case "unchecked", "safe", "suspicious", "malicious", "blocked":
-			newSecStatus = st
-			newSecCheckedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
-			if (st == "blocked" || st == "malicious") && in.IsActive == nil {
-				newIsActive = false
-			}
-		default:
-			return db.Link{}, ErrInvalidInput
-		}
 	}
 
 	updated, err := s.links.AdminUpdate(ctx, existing.Alias, db.AdminUpdateLinkParams{
@@ -1817,7 +1989,7 @@ func (s *LinkService) AdminUpdateLink(ctx context.Context, idStr string, in Upda
 		_, _ = s.qrStore.Generate(updated.PublicID, shortURL)
 	}
 
-	updated.Clicks += s.links.GetPendingClickDelta(ctx, updated.Alias)
+	updated.Clicks += s.pendingFor(ctx, updated.ID, updated.Alias)
 	return updated, nil
 }
 

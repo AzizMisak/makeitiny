@@ -11,12 +11,22 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - ./Backend/db/data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-makeitiny} -d ${POSTGRES_DB:-makeitiny}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   api:
     build: ./Backend/api
@@ -34,8 +44,10 @@ services:
       - ./Backend/db/migrations:/migrations:ro
       - ./Backend/storage/qrcodes:/storage/qrcodes
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   router:
     build: ./Backend/router
@@ -45,10 +57,13 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-makeitiny}:${POSTGRES_PASSWORD:-makeitiny}@postgres:5432/${POSTGRES_DB:-makeitiny}?sslmode=disable
       REDIS_URL: redis://redis:6379
+      FRONTEND_URL: ${PUBLIC_BASE_URL:-http://localhost}
       PORT: "8081"
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   frontend:
     build: ./Frontend

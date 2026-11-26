@@ -51,17 +51,18 @@ const partial = computed(() => props.total > props.logs.length)
 
       <ChartBars class="mt-6" :buckets="buckets" label="Zamana göre tıklama" />
 
-      <div class="mt-12 grid grid-cols-1 gap-x-12 gap-y-10 md:grid-cols-3">
-        <ChartShares title="Cihaz" :rows="devices" />
-        <ChartShares title="Tarayıcı" :rows="browsers" />
-        <ChartShares title="İşletim sistemi" :rows="systems" />
+      <!-- Her kırılım kendi ince çerçevesinde; yan yana durunca karışmaz. -->
+      <div class="mt-10 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <ChartShares title="Cihaz" :rows="devices" class="rounded-md border border-line bg-surface p-5" />
+        <ChartShares title="Tarayıcı" :rows="browsers" class="rounded-md border border-line bg-surface p-5" />
+        <ChartShares title="İşletim sistemi" :rows="systems" class="rounded-md border border-line bg-surface p-5" />
       </div>
 
-      <section class="mt-14">
-        <h3 class="display text-2xl">Ülkeler</h3>
+      <section class="mt-4 rounded-md border border-line bg-surface p-5">
+        <h3 class="font-semibold">Ülkeler</h3>
         <p class="mt-1 text-sm text-ink-3">Ülke, ziyaretçinin tarayıcı dilinden tahmin edilir; kesin konum değildir.</p>
 
-        <div class="mt-5 grid grid-cols-1 gap-x-12 gap-y-10 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <div class="mt-5 grid grid-cols-1 gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
           <div class="overflow-x-auto">
             <table class="w-full min-w-[34rem] text-left text-sm">
               <thead class="text-ink-3">
@@ -84,7 +85,7 @@ const partial = computed(() => props.total > props.logs.length)
               </tbody>
             </table>
           </div>
-          <ChartShares title="Bölgeler" :rows="regions" :limit="7" />
+          <ChartShares title="Bölgeler" :rows="regions" :limit="7" class="lg:border-l lg:border-line lg:pl-10" />
         </div>
       </section>
     </template>

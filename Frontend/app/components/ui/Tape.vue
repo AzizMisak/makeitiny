@@ -3,11 +3,17 @@
 const props = defineProps<{ used: number; max: number; label: string }>()
 
 const unlimited = computed(() => props.max < 0)
-const percent = computed(() => (unlimited.value || props.max === 0 ? 0 : Math.min(100, (props.used / props.max) * 100)))
+const percent = computed(() => {
+  if (unlimited.value) return 0
+  if (props.max === 0) return 100
+  return Math.min(100, (props.used / props.max) * 100)
+})
 const tone = computed(() => (percent.value >= 100 ? 'bg-danger' : percent.value >= 85 ? 'bg-warn' : 'bg-brand'))
 
 const ticks = computed(() => {
   if (unlimited.value) return []
+  if (props.max === 0) return [0]
+  if (props.max < 4) return [0, props.max]
   return Array.from({ length: 5 }, (_, i) => Math.round((props.max / 4) * i))
 })
 </script>
@@ -44,7 +50,7 @@ const ticks = computed(() => {
         <span>0</span>
         <span>sınırsız</span>
       </template>
-      <span v-for="t in ticks" v-else :key="t">{{ formatNumber(t) }}</span>
+      <span v-for="(t, i) in ticks" v-else :key="i">{{ formatNumber(t) }}</span>
     </div>
   </div>
 </template>

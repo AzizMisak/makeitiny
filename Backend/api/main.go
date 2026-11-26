@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -105,8 +107,8 @@ func main() {
 	syncWorker := worker.NewSyncWorker(pool, queries, rdb, qrStore)
 	syncWorker.Start(ctx)
 
-	userRepo := repository.NewUserRepository(queries, rdb, qrStore)
-	linkRepo := repository.NewLinkRepository(queries, rdb, qrStore)
+	userRepo := repository.NewUserRepository(pool, queries, rdb, qrStore)
+	linkRepo := repository.NewLinkRepository(pool, queries, rdb, qrStore)
 
 	authSvc := service.NewAuthService(userRepo, jwtSecret)
 	linkSvc := service.NewLinkService(linkRepo, qrStore, publicBaseURL)
@@ -120,10 +122,35 @@ func main() {
 		"http://localhost",
 		"http://127.0.0.1",
 	}
+	if u, err := url.Parse(strings.TrimSpace(publicBaseURL)); err == nil && u.Scheme != "" && u.Host != "" {
+		origin := u.Scheme + "://" + u.Host
+		found := false
+		for _, o := range allowedOrigins {
+			if o == origin {
+				found = true
+				break
+			}
+		}
+		if !found {
+			allowedOrigins = append(allowedOrigins, origin)
+		}
+	}
+
+	apiHandler := gen.HandlerWithOptions(h, gen.StdHTTPServerOptions{
+		BaseRouter: newPriorityMux(),
+		ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(gen.ApiError{
+				Code:    "invalid_request",
+				Message: err.Error(),
+			})
+		},
+	})
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           withCORS(gen.HandlerFromMux(h, newPriorityMux()), allowedOrigins),
+		Handler:           withCORS(apiHandler, allowedOrigins),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -139,6 +166,10 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
+
+	// Worker son tıklama ve log aktarımını bitirmeden Redis ve PostgreSQL bağlantıları (defer) kapanmaz.
+	syncWorker.Wait()
+	log.Println("api kapandı")
 }
 
 func runMigrations(pool *pgxpool.Pool) {
@@ -159,17 +190,19 @@ func runMigrations(pool *pgxpool.Pool) {
 	defer sqlDB.Close()
 
 	if err := goose.SetDialect("postgres"); err != nil {
-		log.Printf("goose dialect hatası: %v", err)
-		return
+		log.Fatalf("goose dialect hatası: %v", err)
 	}
 	if err := goose.Up(sqlDB, migDir); err != nil {
-		log.Printf("goose up hatası: %v", err)
+		log.Fatalf("goose up hatası: %v", err)
 	}
 }
 
 func withCORS(next http.Handler, allowedOrigins []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Add("Vary", "Origin")
+		}
 		allowed := false
 		for _, o := range allowedOrigins {
 			if o == origin {
@@ -183,6 +216,7 @@ func withCORS(next http.Handler, allowedOrigins []string) http.Handler {
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, Authorization, X-CSRF-Token")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Expose-Headers", "Content-Disposition")
 		}
 
 		if r.Method == http.MethodOptions {

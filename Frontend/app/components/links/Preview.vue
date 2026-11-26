@@ -15,7 +15,7 @@ const rules = computed(() => {
   const list: string[] = []
   if (props.draft.expires && props.draft.expiresAt) list.push(`${formatDateTr(props.draft.expiresAt)} sonunda kapanır.`)
   if (props.draft.limited && Number(props.draft.maxClicks) > 0) list.push(`${formatNumber(Number(props.draft.maxClicks))} tıklamada kapanır.`)
-  if (props.draft.adEnabled) list.push('Ara sayfada reklam alanı açık.')
+  if (props.draft.adEnabled && props.draft.access === 'wait') list.push('Bekleme sayfasında reklam alanı açık.')
   return list
 })
 </script>

@@ -8,10 +8,11 @@ definePageMeta({ layout: 'admin', middleware: 'auth', roles: ['admin', 'owner'] 
 type BanLength = '1d' | '7d' | '30d' | 'permanent' | 'custom'
 
 const route = useRoute()
-const { isOwner } = useAuth()
+const { isOwner, isSelf } = useAuth()
 const { fetchPlans, fetchAdminUserById, fetchAdminUserLinks, adminUpdateUser, adminUpdateUserRole } = useAdmin()
 const { ask } = useConfirm()
 const toast = useToast()
+const { busy: exporting, exportAdminUserLinks } = useExport()
 
 const id = computed(() => String(route.params.id ?? ''))
 const person = ref<User | null>(null)
@@ -24,11 +25,15 @@ const error = ref('')
 
 const planId = ref(1)
 const planExpires = ref('')
+const planError = ref('')
 
 const banReason = ref('')
 const banLength = ref<BanLength>('7d')
 const banDate = ref('')
 const banError = ref('')
+
+watch([planExpires, planId], () => (planError.value = ''))
+watch([banLength, banDate], () => (banError.value = ''))
 
 const BAN_OPTIONS: { value: BanLength; label: string }[] = [
   { value: '1d', label: '1 gün' },
@@ -81,7 +86,9 @@ onMounted(load)
 
 const isTargetOwner = computed(() => !!person.value?.roles.includes('owner'))
 const isTargetAdmin = computed(() => !!person.value?.roles.includes('admin'))
-const canManage = computed(() => isOwner.value || (!isTargetOwner.value && !isTargetAdmin.value))
+const self = computed(() => isSelf(person.value?.id))
+const planless = computed(() => isPrivileged(person.value?.roles))
+const canManage = computed(() => !self.value && (isOwner.value || (!isTargetOwner.value && !isTargetAdmin.value)))
 const canBan = computed(() => canManage.value && !isTargetOwner.value)
 const role = computed(() => roleMeta(person.value?.roles))
 const who = computed(() => (person.value ? `${person.value.name || 'İsimsiz'} (${person.value.email})` : ''))
@@ -91,8 +98,12 @@ const facts = computed(() => {
   if (!u) return []
   return [
     { label: 'Link', value: formatNumber(u.linkCount) },
-    { label: 'Paket', value: u.plan.name },
-    { label: 'Paket bitişi', value: u.planExpiresAt ? formatDateTr(u.planExpiresAt) : 'Süresiz' },
+    ...(isPrivileged(u.roles)
+      ? [{ label: 'Paket', value: 'Pakete tabi değil' }]
+      : [
+          { label: 'Paket', value: u.plan.name },
+          { label: 'Paket bitişi', value: u.planExpiresAt ? formatDateTr(u.planExpiresAt) : 'Süresiz' }
+        ]),
     { label: 'Kayıt', value: formatDateTr(u.createdAt) },
     { label: 'Kimlik', value: u.id }
   ]
@@ -114,11 +125,16 @@ const planChanges = computed<ConfirmChange[]>(() => {
   return list
 })
 
-useUnsavedGuard(() => planChanges.value.length > 0)
+useUnsavedGuard(() => !planless.value && planChanges.value.length > 0)
 
 async function savePlan() {
   const u = person.value
-  if (!u || planChanges.value.length === 0) return
+  if (!u || planless.value || planChanges.value.length === 0) return
+  planError.value = ''
+  if (planExpires.value && planExpires.value < todayIso()) {
+    planError.value = 'Bitiş tarihi bugünden önce olamaz.'
+    return
+  }
   const ok = await ask({
     title: 'Paket değiştirilsin mi?',
     subject: who.value,
@@ -130,12 +146,12 @@ async function savePlan() {
   if (ok) toast.success('Paket değiştirildi.')
 }
 
-const banUntil = computed(() => {
+function computeBanUntil(): string {
   if (banLength.value === 'permanent') return ''
-  if (banLength.value === 'custom') return banDate.value
+  if (banLength.value === 'custom') return banDate.value ? new Date(`${banDate.value}T23:59:59`).toISOString() : ''
   const days = { '1d': 1, '7d': 7, '30d': 30 }[banLength.value]
   return new Date(Date.now() + days * 86_400_000).toISOString()
-})
+}
 
 async function ban() {
   const u = person.value
@@ -145,7 +161,7 @@ async function ban() {
     banError.value = 'Bir bitiş tarihi seç.'
     return
   }
-  const until = banUntil.value
+  const until = computeBanUntil()
   const ok = await ask({
     title: 'Hesap askıya alınsın mı?',
     subject: who.value,
@@ -180,11 +196,25 @@ async function unban() {
 
 async function toggleRole() {
   const u = person.value
-  if (!u || !isOwner.value || isTargetOwner.value) return
+  if (!u || !isOwner.value || isTargetOwner.value || self.value) return
   const next = isTargetAdmin.value ? 'user' : 'admin'
   const ok = await ask(roleChangePrompt(u, next, async () => sync(await adminUpdateUserRole(u.id, next))))
   if (ok) toast.success(next === 'admin' ? 'Yönetici yapıldı.' : 'Yönetici yetkisi kaldırıldı.')
 }
+const exportLinksMenu = computed(() => [
+  {
+    label: 'CSV olarak indir',
+    icon: 'download',
+    disabled: !!exporting.value || !person.value,
+    onSelect: () => person.value && exportAdminUserLinks(person.value.id, 'csv')
+  },
+  {
+    label: 'JSON olarak indir',
+    icon: 'download',
+    disabled: !!exporting.value || !person.value,
+    onSelect: () => person.value && exportAdminUserLinks(person.value.id, 'json')
+  }
+])
 </script>
 
 <template>
@@ -211,6 +241,7 @@ async function toggleRole() {
             <p class="flex flex-wrap items-center gap-x-4 gap-y-1 text-ink-2">
               <span class="truncate">{{ person.email }}</span>
               <UiTag :tone="role.tone">{{ role.label }}</UiTag>
+              <UiTag v-if="self" tone="mark" icon="user">Bu sensin</UiTag>
               <UiStatus :tone="person.isActive ? 'ok' : 'danger'" :label="person.isActive ? 'Aktif' : 'Askıda'" />
             </p>
           </div>
@@ -223,22 +254,58 @@ async function toggleRole() {
           </div>
         </dl>
 
-        <h2 class="mb-4 mt-10 text-lg font-semibold">Linkleri</h2>
+        <div class="mb-4 mt-10 flex flex-wrap items-center justify-between gap-3">
+          <h2 class="text-lg font-semibold">Linkleri</h2>
+          <UiMenu v-if="person.linkCount > 0" label="Kullanıcının linklerini dışa aktar" :items="exportLinksMenu">
+            <template #trigger="{ toggle, open }">
+              <UiButton
+                variant="outline"
+                size="sm"
+                icon="download"
+                :loading="exporting.startsWith('admin-user-links-')"
+                loading-label="Hazırlanıyor"
+                :aria-expanded="open"
+                aria-haspopup="menu"
+                @click="toggle"
+              >
+                Dışa aktar
+              </UiButton>
+            </template>
+          </UiMenu>
+        </div>
         <UiLoadError v-if="linksError" :message="linksError" @retry="loadLinks" />
         <AdminTableSkeleton v-else-if="linksLoading && links.length === 0" :rows="4" label="Kullanıcının linkleri yükleniyor" />
         <UiEmpty v-else-if="links.length === 0" title="Link oluşturmamış" class="border border-line bg-surface" />
-        <AdminLinkTable v-else :links="links" :loading="linksLoading" hide-owner actions caption="Kullanıcının linkleri" @changed="loadLinks" />
+        <template v-else>
+          <AdminLinkTable :links="links" :loading="linksLoading" hide-owner actions caption="Kullanıcının linkleri" @changed="loadLinks" />
+          <p v-if="(person.linkCount ?? 0) > links.length" class="mt-3 text-sm text-ink-2">
+            En yeni 100 link gösteriliyor; tümünü görmek için
+            <NuxtLink :to="`/dashboard/admin/links?search=${encodeURIComponent(person.email)}`" class="font-medium text-brand underline underline-offset-4 hover:text-ink">
+              Linkler sayfasına git
+            </NuxtLink>.
+          </p>
+        </template>
       </div>
 
       <div class="flex flex-col divide-y divide-line border border-line bg-surface">
-        <p v-if="!canManage" class="flex items-center gap-3 px-5 py-4 text-sm text-ink-2">
+        <div v-if="self" class="bg-mark/15 px-5 py-4 text-sm">
+          <p class="font-semibold">Kendi hesabına bakıyorsun.</p>
+          <p class="mt-1 text-ink-2">Kendi rolünü, durumunu ve paketini buradan değiştiremezsin. Adını ve parolanı Hesap ayarlarından değiştirebilirsin.</p>
+        </div>
+        <p v-else-if="!canManage" class="flex items-center gap-3 px-5 py-4 text-sm text-ink-2">
           <UiIcon name="lock" :size="17" /> Yönetici hesaplarını yalnızca sistem sahibi değiştirebilir.
         </p>
 
-        <form class="p-5" novalidate @submit.prevent="savePlan">
+        <section v-if="planless" class="p-5">
+          <h2 class="text-lg font-semibold">Paket</h2>
+          <p class="mt-2 text-sm text-ink-2">{{ PRIVILEGED_PLAN_NOTE }} Bu hesaba paket atanamaz.</p>
+          <p v-if="!isTargetOwner" class="mt-2 text-sm text-ink-3">Kayıtlı paketi ({{ person.plan.name }}) yönetici yetkisi kaldırılırsa yeniden geçerli olur.</p>
+        </section>
+
+        <form v-else class="p-5" novalidate @submit.prevent="savePlan">
           <h2 class="text-lg font-semibold">Paket</h2>
           <UiSelect id="user-plan" v-model="planId" class="mt-3" :options="planOptions" :disabled="!canManage" />
-          <UiField id="user-plan-exp" v-model="planExpires" class="mt-3" label="Bitiş tarihi" type="date" hint="Boşsa süresiz" :disabled="!canManage" />
+          <UiField id="user-plan-exp" v-model="planExpires" class="mt-3" label="Bitiş tarihi" type="date" :min="todayIso()" :error="planError" hint="Boşsa süresiz" :disabled="!canManage" />
           <UiButton type="submit" variant="outline" size="sm" class="mt-2" :disabled="!canManage || planChanges.length === 0">
             {{ planChanges.length === 0 ? 'Değişiklik yok' : 'Paketi değiştir' }}
           </UiButton>
@@ -282,7 +349,8 @@ async function toggleRole() {
             <template v-else-if="isTargetAdmin">Bütün linkleri ve standart kullanıcıları yönetebilir.</template>
             <template v-else>Yalnızca kendi linklerini yönetebilir.</template>
           </p>
-          <UiButton v-if="!isTargetOwner" :variant="isTargetAdmin ? 'danger' : 'outline'" size="sm" icon="key" class="mt-4" :class="isTargetAdmin ? '-ml-3' : ''" @click="toggleRole">
+          <p v-if="self && !isTargetOwner" class="mt-2 text-sm text-ink-3">Kendi rolünü değiştiremezsin.</p>
+          <UiButton v-if="!isTargetOwner && !self" :variant="isTargetAdmin ? 'danger' : 'outline'" size="sm" icon="key" class="mt-4" :class="isTargetAdmin ? '-ml-3' : ''" @click="toggleRole">
             {{ isTargetAdmin ? 'Yönetici yetkisini kaldır' : 'Yönetici yap' }}
           </UiButton>
         </section>

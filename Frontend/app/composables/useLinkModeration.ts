@@ -14,9 +14,6 @@ export function useLinkModeration() {
       message: active
         ? 'Kısa adres yeniden hedefe yönlendirir.'
         : 'Ziyaretçiler hedef yerine "link devre dışı" sayfasını görür.',
-      effects: active && isBlockedStatus(link.securityStatus)
-        ? [`Link hâlâ "${securityMeta(link.securityStatus).label}" durumunda; karar değişmeden ziyaretçi hedefe ulaşamaz.`]
-        : [],
       confirmLabel: active ? 'Yönlendirmeyi aç' : 'Yönlendirmeyi kapat',
       tone: active ? 'normal' : 'danger',
       action: () => adminUpdateLink(link.id, { isActive: active })

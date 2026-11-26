@@ -20,7 +20,7 @@ const emailHint = computed(() => {
 
 async function submit() {
   errors.value = {
-    email: /^\S+@\S+$/.test(email.value.trim()) ? undefined : 'Geçerli bir e-posta yaz.',
+    email: !email.value.trim() ? 'E-postanı yaz.' : /^\S+@\S+\.\S+$/.test(email.value.trim()) ? undefined : 'Geçerli bir e-posta yaz.',
     password: password.value.length >= 4 ? undefined : 'En az 4 karakter yaz.'
   }
   if (errors.value.email || errors.value.password) return

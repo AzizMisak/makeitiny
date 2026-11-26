@@ -204,3 +204,59 @@ Bu doküman, MakeItTiny projesinin geliştirilme sürecinde alınan temel mimari
 * **Gerekçe:**
   * Panelin iskeleti ve rengi birlikte değiştiği için hangi yetkiyle çalışıldığı bakar bakmaz anlaşılır.
   * Ortak onay ve form bileşenleri sayfalar arasındaki davranış farkını ortadan kaldırır.
+
+---
+
+### ADR-014: Ad Değiştirme ve Yetkili Hesapların Paketten Muafiyeti
+
+* **Durum:** Kabul Edildi
+* **Bağlam:** Kullanıcı adı kayıttan sonra değiştirilemiyordu. Yönetici ve sahip hesapları paket sınırlarından zaten muaf tutuluyordu, ama yönetim ekranından bu hesaplara paket atanabiliyor ve arayüz paket adını gösteriyordu.
+* **Karar:**
+  1. **`PATCH /auth/user`:** Oturumdaki kullanıcı yalnızca kendi adını değiştirir. Ad içindeki fazla boşluklar tekleştirilir ve ad 2–40 karakter olmalıdır; aksi hâlde `400 invalid_name` döner. Sorgu `UpdateUserName` olarak `queries.sql` dosyasına eklendi.
+  2. **Paket muafiyeti:** `admin` veya `owner` rolündeki hedefe `planId` ya da `planExpiresAt` gönderilirse `PATCH /admin/users/{id}` isteği `400 plan_not_applicable` ile reddedilir. Kayıtlı paket veritabanında kalır; yönetici yetkisi kaldırılınca yeniden geçerli olur.
+  3. **Frontend:** Yetkili hesaplar her yerde paket adı yerine "Pakete tabi değil" görür. Yönetim ekranında oturumdaki kişinin satırı ve sayfası "Sen / Bu sensin" olarak işaretlenir; kişi kendi rolünü, durumunu ve paketini buradan değiştiremez.
+* **Gerekçe:** Paket kuralı backend'de tek yerde zorlanır; arayüz yalnızca bunu görünür kılar.
+
+---
+
+### ADR-015: Bekleme Bileti, Önbellek Silme Stratejisi, Kimlikle Tıklama Farkı ve SSRF Koruması
+
+* **Durum:** Kabul Edildi
+* **Bağlam:** Hata denetiminde şu sorunlar doğrulandı:
+  * `/preview` hedef adresi sayaç artırmadan veriyordu; bu yüzden bekleme süresi ve tıklama sınırı aşılabiliyordu.
+  * Bekletmeli ve sınırlı linklerde son geçerli ziyaretçi hata ekranına düşüyordu.
+  * Güncellemede Redis'e eski tıklama sayısı ve sahibin ban durumu hesaba katılmadan yazılıyordu.
+  * Tıklama farkları takma adla tutulduğu için takma ad değişince kayboluyordu.
+  * Hedef erişilebilirlik denetimi iç ağa istek atabiliyordu.
+* **Karar:**
+  1. **Bekleme bileti:** Router bekletmeli linkte tıklamayı yönlendirmede sayar ve `wait:{bilet}` anahtarıyla tek kullanımlık bir bilet üretir; ziyaretçi `/w/{alias}?t={bilet}` sayfasına gider. `GET /{link}/wait` kalan süreyi döner. `POST /{link}/continue` süre dolunca bileti atomik olarak siler ve hedefi verir. Bilet bekleme süresinden 10 dakika sonra kendiliğinden düşer. `/preview` hedef adresi hiç döndürmez. `/unlock` yalnızca parolalı linkte çalışır.
+  2. **Erişim denetimi sırası:** Engelli ya da zararlı durum, kapalı durumdan önce denetlenir; böylece ziyaretçi "engellendi" ekranını görür. Bilet ile devam ederken tıklama sınırı yeniden denetlenmez, çünkü ziyaret zaten sayılmıştır.
+  3. **Önbellek silme:** Link güncellemesinde Redis kaydı yeniden yazılmaz, silinir (`link:` ve `reach:`). Router bir sonraki ziyarette sahibin ban durumunu ve henüz yazılmamış tıklamaları ekleyerek PostgreSQL'den okur. Bu, ADR-010'daki "önce PostgreSQL, ardından Redis güncellenir veya silinir" kuralının silme yoludur.
+  4. **Kimlikle tıklama farkı:** `clicks:deltas` alanları `id:{link_id}` biçimindedir. Worker eski sürümden kalan takma ad anahtarlı alanları da işler.
+  5. **Worker güvencesi:**
+     * Tıklama farkları tek bir işlemde yazılır; işlem başarısızsa kopya silinmez ve sonraki turda yeniden denenir.
+     * Loglar kuyruktan veritabanına yazıldıktan sonra kırpılır (`LRANGE` + `LTRIM`). Bu, worker'ın tek api örneğinde çalıştığı varsayımına dayanır.
+     * Süresi dolan askılar her turda kaldırılır.
+     * Kapanışta son aktarım beklenir.
+  6. **SSRF:**
+     * api, iç ağ IP'lerine, `localhost` ve tek kelimelik makine adlarına (Docker servisleri) kısa link vermez.
+     * Router'ın denetim istemcisi, DNS çözümlemesinden sonraki gerçek IP'yi bağlantı anında denetler; DNS rebinding ve iç adrese giden yönlendirmeler de engellenir.
+     * Olumsuz sonuç 30 saniye önbelleklenir.
+  7. **Refresh rotasyonu:** Token tek sorguda "kullanılmadıysa iptal et ve getir" ile tüketilir; eşzamanlı ikinci istek tekrar kullanım sayılır.
+  8. **Dışa aktarma:** `GET /links/export` ve `GET /links/logs/{id}/export` (`format=csv|json`). CSV, UTF-8 BOM ile başlar; formül olarak yorumlanabilecek hücreler `'` ile etkisizleştirilir.
+* **Gerekçe:** Hedef adres yalnızca sayılmış bir ziyaretle verildiği için sayaç ve sınırlar atlanamaz. Önbellek silme, tıklama sayısı ve ban durumunun tek doğru kaynaktan okunmasını sağlar.
+
+---
+
+### ADR-016: Kullanıcının Kendi Paketini Değiştirmesi ve Paket Düşürmede 2 Aylık Askı
+
+* **Durum:** Kabul Edildi
+* **Bağlam:** Standart kullanıcı paketini değiştiremiyordu. Daha düşük pakete geçişte yeni sınırı aşan linklerin hemen silinmemesi isteniyordu.
+* **Karar:**
+  1. `PUT /auth/user/plan` (`planId`) yalnızca standart kullanıcılar içindir; yönetici/sahip `400 plan_not_applicable` alır. Ödeme entegrasyonu olmadığından paket süresiz atanır (`plan_expires_at = NULL`).
+  2. `links.plan_grace_until` sütunu eklendi. Paket değişince, aynı işlemde ve link oluşturmayla aynı danışma kilidi altında, kullanıcının en yeni `max_links` linki askıdan çıkar; kalan **en eski** linkler `NOW() + 60 gün` ile askıya alınır. Zaten askıdaki linkin tarihi korunur (paket değiştirerek süre uzatılamaz). Sınırsız pakette bütün askılar kalkar.
+  3. Askıdaki link yönlendirmeye devam eder; askı yalnızca PostgreSQL'de tutulur, Redis'e yazılmaz. Askıdaki linkler link sayısına dahildir, bu yüzden toplam sınırın altına inene kadar yeni link oluşturulamaz. Kullanıcı bunları istediği an silebilir.
+  4. Worker 5 dakikada bir süresi dolan askıdaki linkleri önce PostgreSQL'den, ardından Redis'ten (`link:`, `reach:`) ve diskteki QR dosyalarından siler; loglar korunur.
+  5. Arayüzde geçiş doğrudan yapılmaz; Paketim sayfasındaki "Bu pakete geç" önce değişiklikleri ve askıya alınacak link sayısını gösteren onay penceresini açar.
+* **Gerekçe:** Paket düşüren kullanıcı verisini hemen kaybetmez ve 2 ay içinde geri dönebilir; sınır aşımı ise yeni link oluşturmayı kapatarak korunur.
+

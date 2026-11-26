@@ -2,9 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,7 +44,8 @@ func main() {
 		frontendURL = "http://localhost"
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	poolCfg, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
@@ -89,16 +96,94 @@ func main() {
 		"http://localhost",
 		"http://127.0.0.1",
 	}
+	if u, err := url.Parse(strings.TrimSpace(frontendURL)); err == nil && u.Scheme != "" && u.Host != "" {
+		origin := u.Scheme + "://" + u.Host
+		found := false
+		for _, o := range allowedOrigins {
+			if o == origin {
+				found = true
+				break
+			}
+		}
+		if !found {
+			allowedOrigins = append(allowedOrigins, origin)
+		}
+	}
 
-	handlerWithCORS := withCORS(gen.Handler(h), allowedOrigins)
+	routes := gen.HandlerWithOptions(h, gen.StdHTTPServerOptions{
+		ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(gen.ApiError{
+				Code:    "invalid_request",
+				Message: err.Error(),
+			})
+		},
+	})
+	root := newRootHandler(h, routes)
 
-	log.Println("router listening on :" + port)
-	log.Fatal(http.ListenAndServe(":"+port, handlerWithCORS))
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           withCORS(root, allowedOrigins),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	go func() {
+		log.Println("router listening on :" + port)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("router sunucu hatası: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("router kapanıyor, açık istekler tamamlanıyor...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("router kapanış uyarısı: %v", err)
+	}
+}
+
+func newRootHandler(h *handler.Handler, routes http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Kısa kod içermeyen istek (nginx üzerinden GET /r/) düz metin 404 yerine hata ekranına gider.
+		if r.URL.Path == "/" || r.URL.Path == "" {
+			h.RootNotFound(w, r)
+			return
+		}
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && strings.HasSuffix(r.URL.Path, "/") {
+			trimmed := strings.TrimRight(r.URL.Path, "/")
+			if trimmed == "" {
+				h.RootNotFound(w, r)
+				return
+			}
+			if !strings.Contains(strings.TrimPrefix(trimmed, "/"), "/") && trimmed != "/health" {
+				r.URL.Path = trimmed
+				if r.URL.RawPath != "" {
+					r.URL.RawPath = strings.TrimRight(r.URL.RawPath, "/")
+				}
+			}
+		}
+		if r.Method == http.MethodGet &&
+			strings.Count(strings.Trim(r.URL.Path, "/"), "/") >= 1 &&
+			!strings.HasSuffix(r.URL.Path, "/preview") &&
+			!strings.HasSuffix(r.URL.Path, "/wait") {
+			h.RootNotFound(w, r)
+			return
+		}
+		routes.ServeHTTP(w, r)
+	})
 }
 
 func withCORS(next http.Handler, allowedOrigins []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Add("Vary", "Origin")
+		}
 		allowed := false
 		for _, o := range allowedOrigins {
 			if o == origin {

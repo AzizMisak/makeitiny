@@ -1,8 +1,11 @@
 openapi: 3.0.3
 info:
   title: MakeItTiny Router
-  version: 0.1.0
-  description: MakeItTiny yüksek hızlı kısa link çözümleme, parola doğrulama ve önizleme servisi.
+  version: 0.2.0
+  description: >
+    MakeItTiny yüksek hızlı kısa link çözümleme, parola doğrulama ve bekleme servisi.
+    Hedef adres yalnızca sayılmış bir ziyaretle verilir: doğrudan yönlendirmede (302), doğru parolayla (/unlock)
+    ya da bekleme bileti süresi dolduktan sonra (/continue).
 servers:
   - url: http://localhost/r
     description: Router (Nginx Reverse Proxy)
@@ -31,10 +34,11 @@ paths:
       tags: [Router]
       summary: Kısaltılmış linki hedef adrese yönlendir
       description: >
-        Şifresiz linklerde 302 Found ile doğrudan hedef adrese yönlendirir.
-        Şifreli linklerde kullanıcıyı şifre çözme ekranına (/unlock/{link}), bekletmeli linklerde bekletme ekranına (/w/{link}) yönlendirir.
-        Kısa link veritabanında bulunamadığında (/error/{link}?reason=not_found) veya hedef adrese ulaşılamadığında (/error/{link}?reason=unreachable) Frontend hata sayfasına yönlendirir.
-        Tıklama istatistiklerinin kaçırılmaması için 301 kullanılmaz; yanıtta Cache-Control no-store, no-cache bulunur.
+        Her zaman 302 Found döner, gövde içermez. Şifresiz ve bekletmesiz linklerde hedef adrese,
+        şifreli linklerde /unlock/{link} ekranına, bekletmeli linklerde tek kullanımlık bilet ile /w/{link}?t={bilet}
+        ekranına yönlendirir. Link bulunamaz, kapalı, engelli, süresi ya da tıklama hakkı dolmuşsa veya hedefe
+        ulaşılamazsa /error/{link}?reason=... ekranına yönlendirir. Engelli (blocked / malicious) durum, kapalı durumdan
+        önce denetlenir. Yanıtta Cache-Control no-store, no-cache bulunur.
       parameters:
         - name: link
           in: path
@@ -53,24 +57,13 @@ paths:
               schema:
                 type: string
                 example: no-store, no-cache
-        '404':
-          description: Kısa link bulunamadı
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
-        '502':
-          description: Hedef adrese ulaşılamıyor
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApiError'
 
   /{link}/unlock:
     post:
       operationId: unlock
       tags: [Router]
-      summary: Şifreli linkin kilidini aç ve hedef adresi döndür / yönlendir
+      summary: Şifreli linkin parolasını doğrula ve hedef adresi döndür
+      description: Yalnızca parola korumalı linklerde çalışır. Doğru parolada tıklama sayılır.
       parameters:
         - name: link
           in: path
@@ -89,33 +82,45 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UnlockLinkResponse'
-        '302':
-          description: Parola doğrulandı, hedef adrese yönlendirildi
-          headers:
-            Location:
-              schema:
-                type: string
+                $ref: '#/components/schemas/TargetResponse'
         '400':
-          description: Geçersiz istek verisi
+          description: Geçersiz istek (invalid_request) ya da link parolalı değil (link_not_locked)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '401':
-          description: Hatalı parola
+          description: Hatalı parola (invalid_password)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Link güvenlik nedeniyle engelli (link_blocked)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '404':
-          description: Kısa link bulunamadı
+          description: Kısa link bulunamadı (link_not_found)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '410':
+          description: Link kapalı (link_disabled), süresi dolmuş (link_expired) ya da tıklama hakkı bitmiş (link_limit_reached)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Çok fazla parola denemesi yapıldı (too_many_requests)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
         '502':
-          description: Hedef adrese ulaşılamıyor
+          description: Hedef adrese ulaşılamıyor (target_unreachable)
           content:
             application/json:
               schema:
@@ -125,7 +130,8 @@ paths:
     get:
       operationId: preview
       tags: [Router]
-      summary: Kısa linkin nereye götürdüğünü önizle
+      summary: Kısa linkin erişim türünü öğren (hedef adres dönmez)
+      description: Tıklama saymaz; bu yüzden hedef adresi hiçbir zaman döndürmez.
       parameters:
         - name: link
           in: path
@@ -139,14 +145,127 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LinkPreview'
-        '404':
-          description: Kısa link bulunamadı
+        '403':
+          description: Link güvenlik nedeniyle engelli (link_blocked)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
-        '502':
-          description: Hedef adrese ulaşılamıyor
+        '404':
+          description: Kısa link bulunamadı (link_not_found)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '410':
+          description: Link kapalı, süresi dolmuş ya da tıklama hakkı bitmiş
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /{link}/wait:
+    get:
+      operationId: waitInfo
+      tags: [Router]
+      summary: Bekleme biletinin durumunu getir
+      description: >
+        Bekletmeli linke yapılan sayılmış ziyaretin bilgisi. Tıklama hakkı bu ziyaretle dolmuş olsa bile bilet geçerlidir.
+      parameters:
+        - name: link
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: t
+          in: query
+          required: true
+          description: Yönlendirmede verilen tek kullanımlık bilet
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Bekleme bilgisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaitInfo'
+        '400':
+          description: Zorunlu bilet parametresi (t) eksik veya geçersiz (invalid_request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Link güvenlik nedeniyle engelli (link_blocked) ya da sonradan parolayla kilitlenmiş (link_locked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Kısa link bulunamadı (link_not_found)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '410':
+          description: Bilet geçersiz ya da kullanılmış (ticket_invalid), link kapalı (link_disabled) veya süresi dolmuş (link_expired)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /{link}/continue:
+    post:
+      operationId: continueWait
+      tags: [Router]
+      summary: Bekleme süresi dolunca bileti kullanıp hedef adresi al
+      description: Bilet tek kullanımlıktır; ikinci kullanımda 410 ticket_invalid döner. Tıklama yönlendirmede zaten sayılmıştır.
+      parameters:
+        - name: link
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContinueRequest'
+      responses:
+        '200':
+          description: Hedef adres
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TargetResponse'
+        '400':
+          description: Geçersiz istek verisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Link güvenlik nedeniyle engelli (link_blocked) ya da sonradan parolayla kilitlenmiş (link_locked)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Kısa link bulunamadı (link_not_found)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '410':
+          description: Bilet geçersiz ya da kullanılmış, link kapalı veya süresi dolmuş
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '425':
+          description: Bekleme süresi henüz dolmadı (wait_not_finished)
           content:
             application/json:
               schema:
@@ -176,7 +295,16 @@ components:
           type: string
           example: gizli123
 
-    UnlockLinkResponse:
+    ContinueRequest:
+      type: object
+      required:
+        - ticket
+      properties:
+        ticket:
+          type: string
+          example: 8xQz2v0n1qL3c9aYwJ5mTt7rKp4dEe6s
+
+    TargetResponse:
       type: object
       required:
         - target
@@ -190,18 +318,14 @@ components:
       type: object
       required:
         - alias
-        - target
         - locked
         - waitEnabled
         - waitSeconds
+        - adEnabled
       properties:
         alias:
           type: string
           example: kampanya-yaz
-        target:
-          type: string
-          description: Link şifreliyse güvenlik için boş döner.
-          example: https://magaza.example.com/kampanyalar/yaz-indirimi
         locked:
           type: boolean
           example: false
@@ -212,3 +336,30 @@ components:
           type: integer
           format: int32
           example: 0
+        adEnabled:
+          type: boolean
+          example: false
+
+    WaitInfo:
+      type: object
+      required:
+        - alias
+        - waitSeconds
+        - remainingSeconds
+        - adEnabled
+      properties:
+        alias:
+          type: string
+          example: kampanya-yaz
+        waitSeconds:
+          type: integer
+          format: int32
+          example: 5
+        remainingSeconds:
+          type: integer
+          format: int32
+          description: Biletin açılmasına kalan saniye (0 ise /continue çağrılabilir)
+          example: 3
+        adEnabled:
+          type: boolean
+          example: true
